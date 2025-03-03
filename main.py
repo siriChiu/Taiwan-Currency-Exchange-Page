@@ -11,12 +11,29 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+st.html("""
+    <style>
+        .stMainBlockContainer {
+            padding: 6rem 0rem 10rem 1rem ;
+        }
+    </style>
+    """
+)
 
 st.html(
     """<style>
     /* Style columns */
     [data-testid="stHeader"]  {
         height: 10px;
+    } 
+    </style>""",
+)
+
+st.html(
+    """<style>
+    /* Style columns */
+    [data-testid="stVerticalBlockBorderWrapper"]  {
+        padding: calc(-1px + 0.5rem); 
     } 
     </style>""",
 )
@@ -28,7 +45,7 @@ st.markdown("""
             <style>
             @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@100&display=swap'); 
             body * {
-                font-family: 'Roboto', sans-serif !important;
+                # font-family: 'Roboto', sans-serif !important;
                 font-size: 30px;
                 font-weight: 500;
                 color: #091747;
@@ -36,7 +53,8 @@ st.markdown("""
             </style>
             """ , unsafe_allow_html= True)
 
-st.markdown("<h2 style='text-align: center; color: red;'>台灣銀行牌告匯率(Bank of Taiwan Exchange Rates)</h2>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center; color: #1a237e; padding: 0;'>寶莎珠寶 Baosha Jewelry</h1>", unsafe_allow_html=True)
+st.markdown("<h3 style='text-align: center; color: #7986cc; padding: 1rem;'>台灣銀行牌告匯率(Bank of Taiwan Exchange Rates)</h3>", unsafe_allow_html=True)
 
 contry_image_dict = {
     "USD": "https://flagicons.lipis.dev/flags/4x3/us.svg",
@@ -58,6 +76,28 @@ contry_image_dict = {
     "VND": "https://flagicons.lipis.dev/flags/4x3/vn.svg",
     "MYR": "https://flagicons.lipis.dev/flags/4x3/my.svg",
     "CNY": "https://flagicons.lipis.dev/flags/4x3/cn.svg",
+}
+
+currency_adjust_dict = {
+    "USD": 1.3,
+    "HKD": 0.15,
+    "GBP": 1.5,
+    "AUD": 1.2,
+    "CAD": 1.2,
+    "SGD": 1.2,
+    "CHF": 1.3,
+    "JPY": 0.12,
+    "ZAR": 0,
+    "SEK": 0,
+    "NZD": 1.2,
+    "THB": 0.5,
+    "PHP": 0.5,
+    "IDR": 0,
+    "EUR": 1.5,
+    "KRW": 0.0012,
+    "VND": 0,
+    "MYR": 0.5,
+    "CNY": 0.3
 }
 
 link = "https://rate.bot.com.tw/xrt/all/day?Lang=en-US"
@@ -84,9 +124,8 @@ for row in table_rows:
     # tds[3]: 即期買入 (Spot Buy)
     # tds[4]: 即期賣出 (Spot Sell)
     # tds[5]: 遠期匯率 link
-    currency_name = tds[0].get_text(strip=True)
-# currenct_name look like "Hong Kong Dollar (HKD)Hong Kong Dollar (HKD)", remove repeated string
-    current_name_remove_repeated = currency_name.split(")")[1] + ")"
+    currency_short_name = tds[0].get_text(strip=True)
+    current_name_remove_repeated = currency_short_name.split(")")[1] + ")"
     current_short_name = current_name_remove_repeated.split(" ")[-1][1:-1]
     country_image = contry_image_dict.get(current_short_name, "")
 
@@ -98,62 +137,58 @@ for row in table_rows:
     # The link text is "查詢" in Chinese, but we'll display "Inquiry"
     forward_link = tds[5].find("a")
     forward_text = "Inquiry" if forward_link else ""
+    
+    if current_short_name == "ZAR" or current_short_name == "SEK":
+        continue
 
     currency_data.append({
         "Image": country_image,
         "Currency": current_name_remove_repeated,
-        # "Cash Buy": cash_buy,
-        "Cash Sell": cash_sell,
-        # "Spot Buy": spot_buy,
-        # "Spot Sell": spot_sell,
+        "Cash Buy": cash_buy,
     })
 
 
 # Split the data into two columns
 if currency_data:
-    currency_data_col1 = currency_data[:10]
-    currency_data_col2 = currency_data[10:]
-
+    currency_data_col1 = currency_data[:9]
+    currency_data_col2 = currency_data[9:]
+    
     col1, col2 = st.columns(2)
     with col1:
-        st.data_editor(
-            currency_data_col1,
-            column_config={
-                "Image": st.column_config.ImageColumn(
-                    "Image", help="Streamlit app preview screenshots", width="small"
-                ),
-                "Currency": st.column_config.TextColumn(
-                    "Currency",
-                    help="Streamlit **widget** commands 🎈",
-                    default="st.",
-                    max_chars=50,
-                    # width="small",
-                )
-            },
-            hide_index=True,
-            use_container_width=True,
-            height = 400,
-            disabled = True,
-        )
+        for currency in currency_data_col1:
+            with st.container(border=True):
+                sub_col1, sub_col2, sub_col3 = st.columns([2,6.5,2.5])
+                currency_short_name=0.0
+                with sub_col1:
+                    sub_col1.image(currency["Image"], width=100)
+                with sub_col2:
+                    currency_split = currency["Currency"].split("(")
+                    currency_name = currency_split[0].strip()
+                    currency_short_name = "(" + currency_split[1][0:3] + ")"
+                    
+                    st.markdown(f"<h3 style='text-align: center; color: #000000; padding: 0;'>{currency_name}</h3>", unsafe_allow_html=True)
+                    st.markdown(f"<h5 style='text-align: center; color: #4c4c4c; padding: 0;'>{currency_short_name}</h5>", unsafe_allow_html=True)
+                with sub_col3:
+                    cash_buy_adjusted = float(currency["Cash Buy"]) - currency_adjust_dict[currency_short_name[1:-1]]
+                    cash_buy_adjusted = round(cash_buy_adjusted, 4)
+                    st.markdown(f"<p style='text-align: center; color: #2727327; padding: 0; font-size: x-large; margin-bottom: -1rem; margin-top: 0.5rem;'>{cash_buy_adjusted}</p>", unsafe_allow_html=True)
     with col2:
-        st.data_editor(
-            currency_data_col2,
-            column_config={
-                "Image": st.column_config.ImageColumn(
-                    "Image", help="Streamlit app preview screenshots", width="small"
-                ),
-                "Currency": st.column_config.TextColumn(
-                    "Currency",
-                    help="Streamlit **widget** commands 🎈",
-                    default="st.",
-                    max_chars=50,
-                    # width="small",
-                )
-            },
-            hide_index=True,
-            use_container_width=True,
-            height = 400,
-            disabled = True,
-        )
+        for currency in currency_data_col2:
+            with st.container(border=True):
+                sub_col1, sub_col2, sub_col3 = st.columns([2,6.6,2.4])
+                currency_short_name=0.0
+                with sub_col1:
+                    sub_col1.image(currency["Image"], width=100)
+                with sub_col2:
+                    currency_split = currency["Currency"].split("(")
+                    currency_name = currency_split[0].strip()
+                    currency_short_name = "(" + currency_split[1][0:3] + ")"
+                    
+                    st.markdown(f"<h3 style='text-align: center; color: #000000; padding: 0;'>{currency_name}</h3>", unsafe_allow_html=True)
+                    st.markdown(f"<h5 style='text-align: center; color: #4c4c4c; padding: 0;'>{currency_short_name}</h5>", unsafe_allow_html=True)
+                with sub_col3:
+                    cash_buy_adjusted = float(currency["Cash Buy"]) - currency_adjust_dict[currency_short_name[1:-1]]
+                    cash_buy_adjusted = round(cash_buy_adjusted, 4)
+                    st.markdown(f"<p style='text-align: center; color: #2727327; padding: 0; font-size: x-large; margin-bottom: -1rem; margin-top: 0.5rem;'>{cash_buy_adjusted}</p>", unsafe_allow_html=True)
 
 st.link_button("#### 台灣銀行牌告匯率(Bank of Taiwan Exchange Rates)", "https://rate.bot.com.tw/xrt?Lang=zh-TW")
