@@ -1,9 +1,11 @@
 # myapp.py
+import datetime
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 from PIL import Image
 import pandas as pd
+from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(
     page_title="Scraped Currency Data",
@@ -11,6 +13,9 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+count = st_autorefresh(interval=10800000, key="parseCurrencyRate") # refresh every 3 hours
+
 st.html("""
     <style>
         .stMainBlockContainer {
@@ -29,13 +34,16 @@ st.html(
     </style>""",
 )
 
+
+# hide header link
 st.html(
-    """<style>
-    /* Style columns */
-    [data-testid="stVerticalBlockBorderWrapper"]  {
-        padding: calc(-1px + 0.5rem); 
-    } 
-    </style>""",
+    body="""
+        <style>
+            [data-testid="stHeaderActionElements"]  {
+                display: none !important;
+            }
+        </style>
+    """,
 )
 
 st.html("<style> .main {overflow: hidden} </style>")
@@ -54,7 +62,14 @@ st.markdown("""
             """ , unsafe_allow_html= True)
 
 st.markdown("<h1 style='text-align: center; color: #1a237e; padding: 0;'>寶莎珠寶 Baosha Jewelry</h1>", unsafe_allow_html=True)
-st.markdown("<h3 style='text-align: center; color: #7986cc; padding: 1rem;'>台灣銀行牌告匯率(Bank of Taiwan Exchange Rates)</h3>", unsafe_allow_html=True)
+col_header1, col_header2 = st.columns([7, 3])
+with col_header1:
+    st.markdown("<a href='https://rate.bot.com.tw/xrt?Lang=zh-TW' style='text-align: center; text-decoration:none; color: #5e689b; padding: 1rem;'>台灣銀行牌告匯率(Bank of Taiwan Exchange Rates)</a>", unsafe_allow_html=True)
+with col_header2:
+    if st.button("Refresh 🔄", type='secondary',use_container_width= True):
+        st.rerun()
+    last_update_time = datetime.datetime.now().strftime("%y-%m-%d %H:%M:%S")
+    st.markdown(f"<p style='text-align: center; color: #4c4c4c; padding: 0rem; font-size: small;'>Last Updated: {last_update_time}</p>", unsafe_allow_html=True)
 
 contry_image_dict = {
     "USD": "https://flagicons.lipis.dev/flags/4x3/us.svg",
@@ -86,12 +101,12 @@ currency_adjust_dict = {
     "CAD": 1.2,
     "SGD": 1.2,
     "CHF": 1.3,
-    "JPY": 0.12,
+    "JPY": 0.012,
     "ZAR": 0,
     "SEK": 0,
     "NZD": 1.2,
-    "THB": 0.5,
-    "PHP": 0.5,
+    "THB": 0.05,
+    "PHP": 0.05,
     "IDR": 0,
     "EUR": 1.5,
     "KRW": 0.0012,
@@ -157,7 +172,7 @@ if currency_data:
     with col1:
         for currency in currency_data_col1:
             with st.container(border=True):
-                sub_col1, sub_col2, sub_col3 = st.columns([2,6.5,2.5])
+                sub_col1, sub_col2, sub_col3 = st.columns([2,6.6,2.4])
                 currency_short_name=0.0
                 with sub_col1:
                     sub_col1.image(currency["Image"], width=100)
@@ -169,7 +184,8 @@ if currency_data:
                     st.markdown(f"<h3 style='text-align: center; color: #000000; padding: 0;'>{currency_name}</h3>", unsafe_allow_html=True)
                     st.markdown(f"<h5 style='text-align: center; color: #4c4c4c; padding: 0;'>{currency_short_name}</h5>", unsafe_allow_html=True)
                 with sub_col3:
-                    cash_buy_adjusted = float(currency["Cash Buy"]) - currency_adjust_dict[currency_short_name[1:-1]]
+                        
+                    cash_buy_adjusted = float(currency["Cash Buy"]) - float(currency_adjust_dict[currency_short_name[1:-1]])
                     cash_buy_adjusted = round(cash_buy_adjusted, 4)
                     st.markdown(f"<p style='text-align: center; color: #2727327; padding: 0; font-size: x-large; margin-bottom: -1rem; margin-top: 0.5rem;'>{cash_buy_adjusted}</p>", unsafe_allow_html=True)
     with col2:
@@ -187,8 +203,7 @@ if currency_data:
                     st.markdown(f"<h3 style='text-align: center; color: #000000; padding: 0;'>{currency_name}</h3>", unsafe_allow_html=True)
                     st.markdown(f"<h5 style='text-align: center; color: #4c4c4c; padding: 0;'>{currency_short_name}</h5>", unsafe_allow_html=True)
                 with sub_col3:
-                    cash_buy_adjusted = float(currency["Cash Buy"]) - currency_adjust_dict[currency_short_name[1:-1]]
+                    cash_buy_adjusted = float(currency["Cash Buy"]) - float(currency_adjust_dict[currency_short_name[1:-1]])
                     cash_buy_adjusted = round(cash_buy_adjusted, 4)
                     st.markdown(f"<p style='text-align: center; color: #2727327; padding: 0; font-size: x-large; margin-bottom: -1rem; margin-top: 0.5rem;'>{cash_buy_adjusted}</p>", unsafe_allow_html=True)
 
-st.link_button("#### 台灣銀行牌告匯率(Bank of Taiwan Exchange Rates)", "https://rate.bot.com.tw/xrt?Lang=zh-TW")
