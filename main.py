@@ -1,10 +1,7 @@
-# myapp.py
 import datetime
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
-from PIL import Image
-import pandas as pd
 from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(
@@ -34,7 +31,6 @@ st.html(
     </style>""",
 )
 
-
 # hide header link
 st.html(
     body="""
@@ -42,34 +38,47 @@ st.html(
             [data-testid="stHeaderActionElements"]  {
                 display: none !important;
             }
+            [data-testid="stTooltipHoverTarget"]  {
+                display: none !important;
+            }
         </style>
     """,
 )
 
-st.html("<style> .main {overflow: hidden} </style>")
-
-
-st.markdown("""
+st.html("""
             <style>
             @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@100&display=swap'); 
             body * {
-                # font-family: 'Roboto', sans-serif !important;
                 font-size: 30px;
                 font-weight: 500;
                 color: #091747;
             }
             </style>
-            """ , unsafe_allow_html= True)
+            """)
 
-st.markdown("<h1 style='text-align: center; color: #1a237e; padding: 0;'>寶莎珠寶 Baosha Jewelry</h1>", unsafe_allow_html=True)
-col_header1, col_header2 = st.columns([7, 3])
-with col_header1:
-    st.markdown("<a href='https://rate.bot.com.tw/xrt?Lang=zh-TW' style='text-align: center; text-decoration:none; color: #5e689b; padding: 1rem;'>台灣銀行牌告匯率(Bank of Taiwan Exchange Rates)</a>", unsafe_allow_html=True)
-with col_header2:
-    if st.button("Refresh 🔄", type='secondary',use_container_width= True):
-        st.rerun()
+st.markdown(
+    """
+        <a href='https://rate.bot.com.tw/xrt?Lang=zh-TW' style='
+        text-align: center; display: block; text-decoration:none; color: #232323; padding: 1rem; font-weight: bold; font-size: xxx-large;
+        '>台灣銀行牌告匯率 (Bank of Taiwan Exchange Rates)</a>
+    """, unsafe_allow_html=True)
+
+st.markdown(
+    """
+    <a href='https://rate.bot.com.tw/xrt?Lang=zh-TW'  style="background-color: #b91a46; width: 100%;  display: flex; 
+                justify-content: center; align-items: center;">
+        <img src="https://rate.bot.com.tw/Content/images/logo.png" style="max-width: 100%; max-height: 90%; height: 5rem;">
+    </a>
+    """,
+    unsafe_allow_html=True
+)
+    
+
+_, col_refresh = st.columns([7, 3])
+with col_refresh:
     last_update_time = datetime.datetime.now().strftime("%y-%m-%d %H:%M:%S")
-    st.markdown(f"<p style='text-align: center; color: #4c4c4c; padding: 0rem; font-size: small;'>Last Updated: {last_update_time}</p>", unsafe_allow_html=True)
+    if st.button(f"🔄 Rrefresh time: {last_update_time}", type='tertiary',use_container_width= True):
+        st.rerun()
 
 contry_image_dict = {
     "USD": "https://flagicons.lipis.dev/flags/4x3/us.svg",
@@ -110,9 +119,9 @@ currency_adjust_dict = {
     "IDR": 0,
     "EUR": 1.5,
     "KRW": 0.0012,
-    "VND": 0,
+    "VND": 0.0005,
     "MYR": 0.5,
-    "CNY": 0.3
+    "CNY": 0.25
 }
 
 link = "https://rate.bot.com.tw/xrt/all/day?Lang=en-US"
