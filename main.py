@@ -1,218 +1,179 @@
-import datetime
 import streamlit as st
-import requests
-from bs4 import BeautifulSoup
-from streamlit_autorefresh import st_autorefresh
+from supabase import create_client, Client
+import datetime as dt
 
-st.set_page_config(
-    page_title="Scraped Currency Data",
-    page_icon=":moneybag:",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+# Initialize Supabase client
+supabase_url = st.secrets["connections_supabase"]["SUPABASE_URL"]
+supabase_key = st.secrets["connections_supabase"]["SUPABASE_KEY"]
+supabase: Client = create_client(supabase_url, supabase_key)
 
-count = st_autorefresh(interval=10800000, key="parseCurrencyRate") # refresh every 3 hours
+st.title("🔐 Supabase Login & Sign Up with User Config")
 
-st.html("""
-    <style>
-        .stMainBlockContainer {
-            padding: 6rem 0rem 10rem 1rem ;
-        }
-    </style>
-    """
-)
+default_currency_adjust_config = {
+        "USD": 1.3,
+        "HKD": 0.15,
+        "GBP": 1.5,
+        "AUD": 1.2,
+        "CAD": 1.2,
+        "SGD": 1.2,
+        "CHF": 1.3,
+        "JPY": 0.012,
+        "ZAR": 0.0,
+        "SEK": 0.0,
+        "NZD": 1.2,
+        "THB": 0.05,
+        "PHP": 0.05,
+        "IDR": 0.0,
+        "EUR": 1.5,
+        "KRW": 0.0012,
+        "VND": 0.0005,
+        "MYR": 0.5,
+        "CNY": 0.25
+    }
 
-st.html(
-    """<style>
-    /* Style columns */
-    [data-testid="stHeader"]  {
-        height: 10px;
-    } 
-    </style>""",
-)
+if 'currency_adjust_dict' not in st.session_state:
+    st.session_state.currency_adjust_config = default_currency_adjust_config
 
-# hide header link
-st.html(
-    body="""
-        <style>
-            [data-testid="stHeaderActionElements"]  {
-                display: none !important;
-            }
-            [data-testid="stTooltipHoverTarget"]  {
-                display: none !important;
-            }
-        </style>
-    """,
-)
+# Initialize session state for user login status
+if 'user' not in st.session_state:
+    st.session_state['user'] = None
+    st.session_state['token'] = None
 
-st.html("""
-            <style>
-            @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@100&display=swap'); 
-            body * {
-                font-size: 30px;
-                font-weight: 500;
-                color: #091747;
-            }
-            </style>
-            """)
+# Display login or sign-up options based on user session
+if st.session_state['user'] is None:
+    login_mode = st.radio("Choose action", ["Login", "Sign Up"])
 
-st.markdown(
-    """
-        <a href='https://rate.bot.com.tw/xrt?Lang=zh-TW' style='
-        text-align: center; display: block; text-decoration:none; color: #232323; padding: 1rem; font-weight: bold; font-size: xxx-large;
-        '>台灣銀行牌告匯率 (Bank of Taiwan Exchange Rates)</a>
-    """, unsafe_allow_html=True)
+    # Sign Up Form
+    if login_mode == "Sign Up":
+        with st.form("signup_form"):
+            name  = st.text_input("Full Name", key="signup_name")
+            email = st.text_input("Email", key="signup_email")
+            password = st.text_input("Password", type="password", key="signup_password")
+            password_confirm = st.text_input("Confirm Password", type="password", key="confirm_password")
+            submitted = st.form_submit_button("Create Account")
 
-st.markdown(
-    """
-    <a href='https://rate.bot.com.tw/xrt?Lang=zh-TW'  style="background-color: #b91a46; width: 100%;  display: flex; 
-                justify-content: center; align-items: center;">
-        <img src="https://rate.bot.com.tw/Content/images/logo.png" style="max-width: 100%; max-height: 90%; height: 5rem;">
-    </a>
-    """,
-    unsafe_allow_html=True
-)
-    
-
-_, col_refresh = st.columns([7, 3])
-with col_refresh:
-    last_update_time = datetime.datetime.now().strftime("%y-%m-%d %H:%M:%S")
-    if st.button(f"🔄 Rrefresh time: {last_update_time}", type='tertiary',use_container_width= True):
-        st.rerun()
-
-contry_image_dict = {
-    "USD": "https://flagicons.lipis.dev/flags/4x3/us.svg",
-    "HKD": "https://flagicons.lipis.dev/flags/4x3/hk.svg",
-    "GBP": "https://flagicons.lipis.dev/flags/4x3/gb.svg",
-    "AUD": "https://flagicons.lipis.dev/flags/4x3/au.svg",
-    "CAD": "https://flagicons.lipis.dev/flags/4x3/ca.svg",
-    "SGD": "https://flagicons.lipis.dev/flags/4x3/sg.svg",
-    "CHF": "https://flagicons.lipis.dev/flags/4x3/ch.svg",
-    "JPY": "https://flagicons.lipis.dev/flags/4x3/jp.svg",
-    "ZAR": "https://flagicons.lipis.dev/flags/4x3/za.svg",
-    "SEK": "https://flagicons.lipis.dev/flags/4x3/se.svg",
-    "NZD": "https://flagicons.lipis.dev/flags/4x3/nz.svg",
-    "THB": "https://flagicons.lipis.dev/flags/4x3/th.svg",
-    "PHP": "https://flagicons.lipis.dev/flags/4x3/ph.svg",
-    "IDR": "https://flagicons.lipis.dev/flags/4x3/id.svg",
-    "EUR": "https://flagicons.lipis.dev/flags/4x3/eu.svg",
-    "KRW": "https://flagicons.lipis.dev/flags/4x3/kr.svg",
-    "VND": "https://flagicons.lipis.dev/flags/4x3/vn.svg",
-    "MYR": "https://flagicons.lipis.dev/flags/4x3/my.svg",
-    "CNY": "https://flagicons.lipis.dev/flags/4x3/cn.svg",
-}
-
-currency_adjust_dict = {
-    "USD": 1.3,
-    "HKD": 0.15,
-    "GBP": 1.5,
-    "AUD": 1.2,
-    "CAD": 1.2,
-    "SGD": 1.2,
-    "CHF": 1.3,
-    "JPY": 0.012,
-    "ZAR": 0,
-    "SEK": 0,
-    "NZD": 1.2,
-    "THB": 0.05,
-    "PHP": 0.05,
-    "IDR": 0,
-    "EUR": 1.5,
-    "KRW": 0.0012,
-    "VND": 0.0005,
-    "MYR": 0.5,
-    "CNY": 0.25
-}
-
-link = "https://rate.bot.com.tw/xrt/all/day?Lang=en-US"
-f = requests.get(link)
-raw_html = f.text
-
-# Parse the HTML with BeautifulSoup
-soup = BeautifulSoup(raw_html, "html.parser")
-
-# Locate table rows
-table_rows = soup.select("table.table tbody tr")
-
-# Prepare a list of dicts for each row
-currency_data = []
-
-for row in table_rows:
-    tds = row.find_all("td")
-    if len(tds) < 6:
-        continue
-    
-    # tds[0]: 幣別 (Currency Name)
-    # tds[1]: 現金買入 (Cash Buy)
-    # tds[2]: 現金賣出 (Cash Sell)
-    # tds[3]: 即期買入 (Spot Buy)
-    # tds[4]: 即期賣出 (Spot Sell)
-    # tds[5]: 遠期匯率 link
-    currency_short_name = tds[0].get_text(strip=True)
-    current_name_remove_repeated = currency_short_name.split(")")[1] + ")"
-    current_short_name = current_name_remove_repeated.split(" ")[-1][1:-1]
-    country_image = contry_image_dict.get(current_short_name, "")
-
-    cash_buy = tds[1].get_text(strip=True)
-    cash_sell = tds[2].get_text(strip=True)
-    spot_buy = tds[3].get_text(strip=True)
-    spot_sell = tds[4].get_text(strip=True)
-
-    # The link text is "查詢" in Chinese, but we'll display "Inquiry"
-    forward_link = tds[5].find("a")
-    forward_text = "Inquiry" if forward_link else ""
-    
-    if current_short_name == "ZAR" or current_short_name == "SEK":
-        continue
-
-    currency_data.append({
-        "Image": country_image,
-        "Currency": current_name_remove_repeated,
-        "Cash Buy": cash_buy,
-    })
-
-
-# Split the data into two columns
-if currency_data:
-    currency_data_col1 = currency_data[:9]
-    currency_data_col2 = currency_data[9:]
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        for currency in currency_data_col1:
-            with st.container(border=True):
-                sub_col1, sub_col2, sub_col3 = st.columns([2,6.6,2.4])
-                currency_short_name=0.0
-                with sub_col1:
-                    sub_col1.image(currency["Image"], width=100)
-                with sub_col2:
-                    currency_split = currency["Currency"].split("(")
-                    currency_name = currency_split[0].strip()
-                    currency_short_name = "(" + currency_split[1][0:3] + ")"
-                    
-                    st.markdown(f"<h3 style='text-align: center; color: #000000; padding: 0;'>{currency_name}</h3>", unsafe_allow_html=True)
-                    st.markdown(f"<h5 style='text-align: center; color: #4c4c4c; padding: 0;'>{currency_short_name}</h5>", unsafe_allow_html=True)
-                with sub_col3:
+            if submitted:
+                if password != password_confirm:
+                    st.error("Passwords do not match!")
+                else:
+                    try:
+                        # Sign up using Supabase
+                        login_result = supabase.auth.sign_up({
+                            "email": email,
+                            "password": password,
+                        })
+                        st.success(f"Account created successfully! Please check your email for verification.")
+                        # Auto login after sign up
+                        login_result = supabase.auth.sign_in_with_password({
+                            "email": email,
+                            "password": password,
+                        })
+                        st.session_state['user'] = login_result.user
+                        st.session_state['token'] = login_result.session.access_token
+                        st.success("Logged in successfully.")
                         
-                    cash_buy_adjusted = float(currency["Cash Buy"]) - float(currency_adjust_dict[currency_short_name[1:-1]])
-                    cash_buy_adjusted = round(cash_buy_adjusted, 4)
-                    st.markdown(f"<p style='text-align: center; color: #2727327; padding: 0; font-size: x-large; margin-bottom: -1rem; margin-top: 0.5rem;'>{cash_buy_adjusted}</p>", unsafe_allow_html=True)
-    with col2:
-        for currency in currency_data_col2:
-            with st.container(border=True):
-                sub_col1, sub_col2, sub_col3 = st.columns([2,6.6,2.4])
-                currency_short_name=0.0
-                with sub_col1:
-                    sub_col1.image(currency["Image"], width=100)
-                with sub_col2:
-                    currency_split = currency["Currency"].split("(")
-                    currency_name = currency_split[0].strip()
-                    currency_short_name = "(" + currency_split[1][0:3] + ")"
-                    
-                    st.markdown(f"<h3 style='text-align: center; color: #000000; padding: 0;'>{currency_name}</h3>", unsafe_allow_html=True)
-                    st.markdown(f"<h5 style='text-align: center; color: #4c4c4c; padding: 0;'>{currency_short_name}</h5>", unsafe_allow_html=True)
-                with sub_col3:
-                    cash_buy_adjusted = float(currency["Cash Buy"]) - float(currency_adjust_dict[currency_short_name[1:-1]])
-                    cash_buy_adjusted = round(cash_buy_adjusted, 4)
-                    st.markdown(f"<p style='text-align: center; color: #2727327; padding: 0; font-size: x-large; margin-bottom: -1rem; margin-top: 0.5rem;'>{cash_buy_adjusted}</p>", unsafe_allow_html=True)
+                        user_id = login_result.user.id
+                        token = login_result.session.access_token
 
+                        # Fetch user subscription status from Supabase
+                        user_response = supabase.auth.get_user(token)
+                        user_data = user_response.user
+
+                        # Check subscription status
+                        default_user_info = {"user": name,
+                                            "email": email,}
+                        
+                        default_subscription_info = {"registered_date": dt.datetime.now().strftime("%Y-%m-%d"),
+                                                    "start_date": dt.datetime.now().strftime("%Y-%m-%d"),
+                                                    "alert_date": (dt.datetime.now() + dt.timedelta(days=30)).strftime("%Y-%m-%d"),
+                                                    "expiration_date": (dt.datetime.now() + dt.timedelta(days=60)).strftime("%Y-%m-%d"),
+                                                    "status": "active",
+                                                    "service_type": "monthly",
+                                                    }
+                        
+                        supabase.table("user_configs").insert({
+                            "user_id": user_id,
+                            "user_info": default_user_info,
+                            "subscription_info": default_subscription_info,
+                            "currency_adjust_config": st.session_state.currency_adjust_config
+                        }).execute()
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+
+    # Login Form
+    if login_mode == "Login":
+        with st.form("login_form"):
+            email = st.text_input("Email", key="login_email")
+            password = st.text_input("Password", type="password", key="login_password")
+            submitted = st.form_submit_button("Login")
+
+            if submitted:
+                try:
+                    # Login using Supabase
+                    login_result = supabase.auth.sign_in_with_password({
+                        "email": email,
+                        "password": password,
+                    })
+                    st.session_state['user'] = login_result.user
+                    st.session_state['token'] = login_result.session.access_token
+                    st.success("Logged in successfully.")
+
+
+                except Exception as e:
+                    st.error(f"Login failed: {e}")
+
+# After login, allow user to customize settings
+if st.session_state['user']:
+    user_id = st.session_state['user'].id
+    token = st.session_state['token']
+
+    # Fetch user subscription status from Supabase
+    user_response = supabase.auth.get_user(token)
+    user_data = user_response.user
+
+    st.info(f"Welcome, {st.session_state['user'].email}")
+
+    # Fetch user config from Supabase
+    headers = {"Authorization": f"Bearer {token}"}
+    response = supabase.table("user_configs").select("*")\
+        .eq("user_id", user_id).execute()
+
+
+    if response.data:
+        if 'currency_adjust_config' in response.data[0] and response.data[0]["currency_adjust_config"]:
+            st.session_state.currency_adjust_config = response.data[0]["currency_adjust_config"]
+            st.write(st.session_state.currency_adjust_config)
+
+        if 'subscription_info' in response.data[0]:
+
+            # Check subscription status
+            subscription_info = response.data[0]["subscription_info"]
+            if dt.datetime.now() > dt.datetime.strptime(subscription_info["expiration_date"], "%Y-%m-%d"):
+                subscription_info["status"] = "expired"
+                supabase.table("user_configs").update({"subscription_info": subscription_info})\
+                    .eq("user_id", user_id).execute()
+        else:
+            st.warning("No subscription info found.")
+        
+        if 'user_info' not in response.data[0]:
+            st.warning("No user info found.")
+    else:
+        st.warning("No any config found.")
+
+
+
+    st.switch_page("pages/currency_exchange.py")
+
+    # Update user config (theme preference)
+
+    # if st.button("Save Config"):
+    #     supabase.table("user_configs").update({"currency_adjust_config": st.session_state.currency_adjust_config})\
+    #         .eq("user_id", user_id).execute()
+    #     st.write(st.session_state.currency_adjust_config)
+    #     st.write(default_currency_adjust_config)
+    #     st.write(user_id)
+    #     st.success("Configuration updated!")
+
+    # if st.button("Logout"):
+    #     st.session_state['user'] = None
+    #     st.session_state['token'] = None
