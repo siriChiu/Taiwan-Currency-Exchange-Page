@@ -1,9 +1,10 @@
 import datetime
+import os
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 from streamlit_autorefresh import st_autorefresh
-
+from package import validation
 st.set_page_config(
     page_title="Scraped Currency Data",
     page_icon=":moneybag:",
@@ -11,7 +12,57 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+if 'default_currency_adjust_dict' not in st.session_state:
+    st.session_state.default_currency_adjust_dict = {
+        "USD": 1.3,
+        "HKD": 0.15,
+        "GBP": 1.5,
+        "AUD": 1.2,
+        "CAD": 1.2,
+        "SGD": 1.2,
+        "CHF": 1.3,
+        "JPY": 0.012,
+        "ZAR": 0.0,
+        "SEK": 0.0,
+        "NZD": 1.2,
+        "THB": 0.05,
+        "PHP": 0.05,
+        "IDR": 0.0,
+        "EUR": 1.5,
+        "KRW": 0.0012,
+        "VND": 0.0005,
+        "MYR": 0.5,
+        "CNY": 0.25
+    }
+
+user_currency_adjust_dict = st.session_state.default_currency_adjust_dict
+
+if os.path.exists("currency_adjust_dict.json"):
+    with open("currency_adjust_dict.json", "r") as f:
+        user_currency_adjust_dict = eval(f.read())
+
+with st.sidebar:
+    with st.expander("設定",icon="⚙️", expanded=False):
+        st.write("螢幕方向")
+        st.radio("螢幕方向", ["橫向", "直向"], index=0, key="screen_side", label_visibility="collapsed")
+
+        st.write("校正匯率")
+        with st.form(key="form"):
+            for key, value in user_currency_adjust_dict.items():
+                column1, column2 = st.columns([1, 3])
+                with column1:
+                    st.write(key)
+                with column2:
+                    user_currency_adjust_dict[key] = st.number_input(key, value=value, step=0.01, label_visibility="collapsed")
+
+            submit_button = st.form_submit_button(label="確定", type="primary")
+            if submit_button:
+                with open("currency_adjust_dict.json", "w") as f:
+                    f.write(f"{user_currency_adjust_dict}")
+
 count = st_autorefresh(interval=10800000, key="parseCurrencyRate") # refresh every 3 hours
+
+service_status = validation.check()
 
 st.html("""
     <style>
@@ -73,7 +124,6 @@ st.markdown(
     unsafe_allow_html=True
 )
     
-
 _, col_refresh = st.columns([7, 3])
 with col_refresh:
     last_update_time = datetime.datetime.now().strftime("%y-%m-%d %H:%M:%S")
@@ -100,28 +150,6 @@ contry_image_dict = {
     "VND": "https://flagicons.lipis.dev/flags/4x3/vn.svg",
     "MYR": "https://flagicons.lipis.dev/flags/4x3/my.svg",
     "CNY": "https://flagicons.lipis.dev/flags/4x3/cn.svg",
-}
-
-currency_adjust_dict = {
-    "USD": 1.3,
-    "HKD": 0.15,
-    "GBP": 1.5,
-    "AUD": 1.2,
-    "CAD": 1.2,
-    "SGD": 1.2,
-    "CHF": 1.3,
-    "JPY": 0.012,
-    "ZAR": 0,
-    "SEK": 0,
-    "NZD": 1.2,
-    "THB": 0.05,
-    "PHP": 0.05,
-    "IDR": 0,
-    "EUR": 1.5,
-    "KRW": 0.0012,
-    "VND": 0.0005,
-    "MYR": 0.5,
-    "CNY": 0.25
 }
 
 link = "https://rate.bot.com.tw/xrt/all/day?Lang=en-US"
@@ -194,7 +222,7 @@ if currency_data:
                     st.markdown(f"<h5 style='text-align: center; color: #4c4c4c; padding: 0;'>{currency_short_name}</h5>", unsafe_allow_html=True)
                 with sub_col3:
                         
-                    cash_buy_adjusted = float(currency["Cash Buy"]) - float(currency_adjust_dict[currency_short_name[1:-1]])
+                    cash_buy_adjusted = float(currency["Cash Buy"]) - float(user_currency_adjust_dict[currency_short_name[1:-1]])
                     cash_buy_adjusted = round(cash_buy_adjusted, 4)
                     st.markdown(f"<p style='text-align: center; color: #2727327; padding: 0; font-size: x-large; margin-bottom: -1rem; margin-top: 0.5rem;'>{cash_buy_adjusted}</p>", unsafe_allow_html=True)
     with col2:
@@ -212,7 +240,7 @@ if currency_data:
                     st.markdown(f"<h3 style='text-align: center; color: #000000; padding: 0;'>{currency_name}</h3>", unsafe_allow_html=True)
                     st.markdown(f"<h5 style='text-align: center; color: #4c4c4c; padding: 0;'>{currency_short_name}</h5>", unsafe_allow_html=True)
                 with sub_col3:
-                    cash_buy_adjusted = float(currency["Cash Buy"]) - float(currency_adjust_dict[currency_short_name[1:-1]])
+                    cash_buy_adjusted = float(currency["Cash Buy"]) - float(user_currency_adjust_dict[currency_short_name[1:-1]])
                     cash_buy_adjusted = round(cash_buy_adjusted, 4)
                     st.markdown(f"<p style='text-align: center; color: #2727327; padding: 0; font-size: x-large; margin-bottom: -1rem; margin-top: 0.5rem;'>{cash_buy_adjusted}</p>", unsafe_allow_html=True)
 
