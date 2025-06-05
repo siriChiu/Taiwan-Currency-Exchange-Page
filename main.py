@@ -28,8 +28,8 @@ if 'default_currency_adjust_dict' not in st.session_state:
         "PHP": 0.05,
         "IDR": 0.0,
         "EUR": 1.5,
-        "KRW": 0.0012,
-        "VND": 0.0005,
+        "KRW": 0.00123,
+        "VND": 0.000064,
         "MYR": 0.5,
         "CNY": 0.25
     }
@@ -197,7 +197,7 @@ if currency_data:
                 with sub_col3:
                         
                     cash_buy_adjusted = float(currency["Cash Buy"]) - float(user_currency_adjust_dict[currency_short_name[1:-1]])
-                    cash_buy_adjusted = round(cash_buy_adjusted, 4)
+                    cash_buy_adjusted = round(cash_buy_adjusted, 5)
                     st.markdown(f"<p style='text-align: center; color: #2727327; padding: 0; font-size: x-large; margin-bottom: -1rem; margin-top: 0.5rem;'>{cash_buy_adjusted}</p>", unsafe_allow_html=True)
     with col2:
         for currency in currency_data_col2:
@@ -215,6 +215,6 @@ if currency_data:
                     st.markdown(f"<h5 style='text-align: center; color: #4c4c4c; padding: 0;'>{currency_short_name}</h5>", unsafe_allow_html=True)
                 with sub_col3:
                     cash_buy_adjusted = float(currency["Cash Buy"]) - float(user_currency_adjust_dict[currency_short_name[1:-1]])
-                    cash_buy_adjusted = round(cash_buy_adjusted, 4)
+                    cash_buy_adjusted = round(cash_buy_adjusted, 5)
                     st.markdown(f"<p style='text-align: center; color: #2727327; padding: 0; font-size: x-large; margin-bottom: -1rem; margin-top: 0.5rem;'>{cash_buy_adjusted}</p>", unsafe_allow_html=True)
 
