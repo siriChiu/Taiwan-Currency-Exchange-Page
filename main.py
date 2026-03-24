@@ -1,13 +1,71 @@
 import streamlit as st
-from supabase import create_client, Client
-import datetime as dt
+import platform
+from pathlib import Path
+from types import SimpleNamespace
+from package import browser_storage
+from package import local_storage
+from package import validation
 
-# Initialize Supabase client
-supabase_url = st.secrets["connections_supabase"]["SUPABASE_URL"]
-supabase_key = st.secrets["connections_supabase"]["SUPABASE_KEY"]
-supabase: Client = create_client(supabase_url, supabase_key)
 
-st.title("🔐 Supabase Login & Sign Up with User Config")
+def _build_browser_user() -> SimpleNamespace:
+    browser_user_id = browser_storage.get_or_create_browser_user_id()
+    return SimpleNamespace(id=browser_user_id, email=f"{browser_user_id}@browser.local")
+
+
+def _sync_subscription_from_google_sheet(user_id: str) -> None:
+    try:
+        subscription_info = validation.get_subscription_info()
+        local_storage.save_subscription(user_id, subscription_info)
+        st.session_state['subscription_sync_message'] = None
+    except Exception as exc:
+        if local_storage.load_subscription(user_id) is None:
+            st.error(f"無法從 Google Sheet 驗證訂閱資訊：{exc}")
+            st.stop()
+        st.session_state['subscription_sync_message'] = (
+            f"目前無法連線到 Google Sheet，已改用本機快取的訂閱資料。原因：{exc}"
+        )
+
+
+def _config_exists() -> bool:
+    # Check st.secrets first (Streamlit Cloud)
+    try:
+        _ = st.secrets["operator"]["company"]
+        return True
+    except (KeyError, Exception):
+        pass
+    _app_dir = Path.home() / ".currency_app"
+    return (_app_dir / "config.ini").exists() or Path("./config.ini").exists()
+
+
+def _show_registration_form():
+    st.title("初次設定")
+    st.info("請輸入您的訂閱資訊，需與 Google Sheet 中的記錄相符。")
+    with st.form("setup_form"):
+        company = st.text_input("公司名稱")
+        owner = st.text_input("負責人")
+        submitted = st.form_submit_button("確認註冊")
+    if submitted:
+        if not company or not owner:
+            st.error("請填寫所有欄位")
+        else:
+            ssid = platform.node()
+            try:
+                validation.write_config(company, owner, ssid)
+            except Exception as e:
+                st.error(f"無法寫入設定檔：{e}")
+                st.stop()
+            try:
+                validation.update_ssid_in_sheet(company, owner, ssid)
+            except Exception as e:
+                st.warning(f"設定已儲存，但無法更新 Google Sheet SSID：{e}")
+            st.rerun()
+    st.stop()
+
+
+if not _config_exists():
+    _show_registration_form()
+
+st.title("Currency Exchange")
 
 default_currency_adjust_config = {
         "USD": 1.3,
@@ -31,149 +89,31 @@ default_currency_adjust_config = {
         "CNY": 0.25
     }
 
-if 'currency_adjust_dict' not in st.session_state:
-    st.session_state.currency_adjust_config = default_currency_adjust_config
+if 'currency_adjust_config' not in st.session_state:
+    st.session_state.currency_adjust_config = default_currency_adjust_config.copy()
 
-# Initialize session state for user login status
 if 'user' not in st.session_state:
     st.session_state['user'] = None
     st.session_state['token'] = None
+if 'subscription_sync_message' not in st.session_state:
+    st.session_state['subscription_sync_message'] = None
 
-# Display login or sign-up options based on user session
 if st.session_state['user'] is None:
-    login_mode = st.radio("Choose action", ["Login", "Sign Up"])
-
-    # Sign Up Form
-    if login_mode == "Sign Up":
-        with st.form("signup_form"):
-            name  = st.text_input("Full Name", key="signup_name")
-            email = st.text_input("Email", key="signup_email")
-            password = st.text_input("Password", type="password", key="signup_password")
-            password_confirm = st.text_input("Confirm Password", type="password", key="confirm_password")
-            submitted = st.form_submit_button("Create Account")
-
-            if submitted:
-                if password != password_confirm:
-                    st.error("Passwords do not match!")
-                else:
-                    try:
-                        # Sign up using Supabase
-                        login_result = supabase.auth.sign_up({
-                            "email": email,
-                            "password": password,
-                        })
-                        st.success(f"Account created successfully! Please check your email for verification.")
-                        # Auto login after sign up
-                        login_result = supabase.auth.sign_in_with_password({
-                            "email": email,
-                            "password": password,
-                        })
-                        st.session_state['user'] = login_result.user
-                        st.session_state['token'] = login_result.session.access_token
-                        st.success("Logged in successfully.")
-                        
-                        user_id = login_result.user.id
-                        token = login_result.session.access_token
-
-                        # Fetch user subscription status from Supabase
-                        user_response = supabase.auth.get_user(token)
-                        user_data = user_response.user
-
-                        # Check subscription status
-                        default_user_info = {"user": name,
-                                            "email": email,}
-                        
-                        default_subscription_info = {"registered_date": dt.datetime.now().strftime("%Y-%m-%d"),
-                                                    "start_date": dt.datetime.now().strftime("%Y-%m-%d"),
-                                                    "alert_date": (dt.datetime.now() + dt.timedelta(days=30)).strftime("%Y-%m-%d"),
-                                                    "expiration_date": (dt.datetime.now() + dt.timedelta(days=60)).strftime("%Y-%m-%d"),
-                                                    "status": "active",
-                                                    "service_type": "monthly",
-                                                    }
-                        
-                        supabase.table("user_configs").insert({
-                            "user_id": user_id,
-                            "user_info": default_user_info,
-                            "subscription_info": default_subscription_info,
-                            "currency_adjust_config": st.session_state.currency_adjust_config
-                        }).execute()
-                    except Exception as e:
-                        st.error(f"Error: {e}")
-
-    # Login Form
-    if login_mode == "Login":
-        with st.form("login_form"):
-            email = st.text_input("Email", key="login_email")
-            password = st.text_input("Password", type="password", key="login_password")
-            submitted = st.form_submit_button("Login")
-
-            if submitted:
-                try:
-                    # Login using Supabase
-                    login_result = supabase.auth.sign_in_with_password({
-                        "email": email,
-                        "password": password,
-                    })
-                    st.session_state['user'] = login_result.user
-                    st.session_state['token'] = login_result.session.access_token
-                    st.success("Logged in successfully.")
-
-
-                except Exception as e:
-                    st.error(f"Login failed: {e}")
-
-# After login, allow user to customize settings
-if st.session_state['user']:
-    user_id = st.session_state['user'].id
-    token = st.session_state['token']
-
-    # Fetch user subscription status from Supabase
-    user_response = supabase.auth.get_user(token)
-    user_data = user_response.user
-
-    st.info(f"Welcome, {st.session_state['user'].email}")
-
-    # Fetch user config from Supabase
-    headers = {"Authorization": f"Bearer {token}"}
-    response = supabase.table("user_configs").select("*")\
-        .eq("user_id", user_id).execute()
-
-
-    if response.data:
-        if 'currency_adjust_config' in response.data[0] and response.data[0]["currency_adjust_config"]:
-            st.session_state.currency_adjust_config = response.data[0]["currency_adjust_config"]
-            st.write(st.session_state.currency_adjust_config)
-
-        if 'subscription_info' in response.data[0]:
-
-            # Check subscription status
-            subscription_info = response.data[0]["subscription_info"]
-            if dt.datetime.now() > dt.datetime.strptime(subscription_info["expiration_date"], "%Y-%m-%d"):
-                subscription_info["status"] = "expired"
-                supabase.table("user_configs").update({"subscription_info": subscription_info})\
-                    .eq("user_id", user_id).execute()
-        else:
-            st.warning("No subscription info found.")
-        
-        if 'user_info' not in response.data[0]:
-            st.warning("No user info found.")
-    else:
-        st.warning("No any config found.")
-
-
-
+    browser_user = _build_browser_user()
+    st.session_state['user'] = browser_user
+    st.session_state['token'] = "browser-local-token"
+    st.session_state['currency_adjust_config'] = browser_storage.get_json(
+        "currency_adjust_config",
+        default_currency_adjust_config.copy(),
+    )
+    _sync_subscription_from_google_sheet(browser_user.id)
     st.switch_page("pages/currency_exchange.py")
 
-    # Update user config (theme preference)
-
-    # if st.button("Save Config"):
-    #     supabase.table("user_configs").update({"currency_adjust_config": st.session_state.currency_adjust_config})\
-    #         .eq("user_id", user_id).execute()
-    #     st.write(st.session_state.currency_adjust_config)
-    #     st.write(default_currency_adjust_config)
-    #     st.write(user_id)
-    #     st.success("Configuration updated!")
-
-    # if st.button("Logout"):
-    #     st.session_state['user'] = None
-    #     st.session_state['token'] = None
+if st.session_state['user']:
+    user_id = st.session_state['user'].id
+    st.session_state['currency_adjust_config'] = browser_storage.get_json(
+        "currency_adjust_config",
+        st.session_state.get('currency_adjust_config', default_currency_adjust_config),
+    )
+    _sync_subscription_from_google_sheet(user_id)
+    st.switch_page("pages/currency_exchange.py")

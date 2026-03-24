@@ -1,9 +1,10 @@
 import datetime
-import os
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 from streamlit_autorefresh import st_autorefresh
+from package import browser_storage
+from package import local_storage
 from package import validation
 st.set_page_config(
     page_title="currency exchange",
@@ -15,8 +16,46 @@ st.set_page_config(
 if 'user' not in st.session_state or 'token' not in st.session_state:
     st.switch_page("main.py")
 
-if 'default_currency_adjust_dict' not in st.session_state:
-    st.session_state.default_currency_adjust_dict = {
+user_id = st.session_state['user'].id
+
+try:
+    latest_subscription = validation.get_subscription_info()
+    local_storage.save_subscription(user_id, latest_subscription)
+    st.session_state['subscription_sync_message'] = None
+except Exception as exc:
+    if local_storage.load_subscription(user_id) is None:
+        st.error(f"無法從 Google Sheet 驗證訂閱資訊：{exc}")
+        st.stop()
+    st.session_state['subscription_sync_message'] = (
+        f"目前無法連線到 Google Sheet，已改用本機快取的訂閱資料。原因：{exc}"
+    )
+
+if st.session_state.get('subscription_sync_message'):
+    st.info(st.session_state['subscription_sync_message'], icon="ℹ️")
+
+# st.caption("匯率設定會儲存在此瀏覽器的 localStorage 中。更換瀏覽器、清除網站資料或使用無痕模式時，設定可能不會保留。")
+
+# ── Subscription check ────────────────────────────────────────────────────────
+_sub_status = local_storage.get_subscription_status(user_id)
+if _sub_status["is_expired"]:
+    st.error(
+        "⛔ 您的訂閱已到期，無法繼續使用。\n\n"
+        f"到期日：{_sub_status['sub']['expiration_date']}\n\n"
+        "請聯絡管理員續訂。",
+        icon="🔒",
+    )
+    st.stop()
+elif _sub_status["near_expiry"]:
+    days = _sub_status["days_left"]
+    expiry_date = _sub_status["sub"]["expiration_date"]
+    st.warning(
+        f"⚠️ 您的訂閱將在 **{days} 天後**（{expiry_date}）到期，請儘早聯絡管理員續訂。",
+        icon="⚠️",
+    )
+# ─────────────────────────────────────────────────────────────────────────────
+
+if 'currency_adjust_config' not in st.session_state:
+    st.session_state['currency_adjust_config'] = {
         "USD": 1.3,
         "HKD": 0.15,
         "GBP": 1.5,
@@ -38,16 +77,17 @@ if 'default_currency_adjust_dict' not in st.session_state:
         "CNY": 0.25
     }
 
-user_currency_adjust_dict = st.session_state.default_currency_adjust_dict
+st.session_state['currency_adjust_config'] = browser_storage.get_json(
+    "currency_adjust_config",
+    st.session_state['currency_adjust_config'],
+)
 
-if os.path.exists("currency_adjust_dict.json"):
-    with open("currency_adjust_dict.json", "r") as f:
-        user_currency_adjust_dict = eval(f.read())
+user_currency_adjust_dict = dict(st.session_state['currency_adjust_config'])
 
 with st.sidebar:
-    with st.expander("設定",icon="⚙️", expanded=False):
-        st.write("螢幕方向")
-        st.radio("螢幕方向", ["橫向", "直向"], index=0, key="screen_side", label_visibility="collapsed")
+    with st.expander("設定",icon="⚙️", expanded=True):
+        # st.write("螢幕方向")
+        # st.radio("螢幕方向", ["橫向", "直向"], index=0, key="screen_side", label_visibility="collapsed")
 
         st.write("校正匯率")
         with st.form(key="form"):
@@ -56,23 +96,22 @@ with st.sidebar:
                 with column1:
                     st.write(key)
                 with column2:
-                    user_currency_adjust_dict[key] = st.number_input(key, value=value, step=0.01, label_visibility="collapsed")
+                    user_currency_adjust_dict[key] = st.number_input(key, value=value, step=0.000001, format="%.6f", label_visibility="collapsed")
 
             submit_button = st.form_submit_button(label="確定", type="primary")
             if submit_button:
-                with open("currency_adjust_dict.json", "w") as f:
-                    f.write(f"{user_currency_adjust_dict}")
+                browser_storage.set_json("currency_adjust_config", user_currency_adjust_dict)
+                st.session_state['currency_adjust_config'] = dict(user_currency_adjust_dict)
+                st.success("已儲存到此瀏覽器的個人匯率設定")
         
 
-        if st.button("Logout"):
-            st.session_state['user'] = None
-            st.session_state['token'] = None
-            st.switch_page("main.py")
+        # if st.button("Logout"):
+        #     st.session_state['user'] = None
+        #     st.session_state['token'] = None
+        #     st.switch_page("main.py")
 
 
 count = st_autorefresh(interval=10800000, key="parseCurrencyRate") # refresh every 3 hours
-
-service_status = validation.check()
 
 st.html("""
     <style>
@@ -100,6 +139,9 @@ st.html(
                 display: none !important;
             }
             [data-testid="stTooltipHoverTarget"]  {
+                display: none !important;
+            }
+            [data-testid="stSidebarNav"] {
                 display: none !important;
             }
         </style>

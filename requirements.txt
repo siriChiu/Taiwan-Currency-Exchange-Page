@@ -4,3 +4,6 @@ beautifulsoup4
 Pillow
 pandas
 streamlit-autorefresh
+gspread
+oauth2client
+streamlit-js-eval
