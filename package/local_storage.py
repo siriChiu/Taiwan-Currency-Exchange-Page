@@ -172,14 +172,15 @@ def get_subscription_status(user_id: str) -> dict:
             raise ValueError("Invalid expiration date")
         days_left = (expiry - today).days
         is_expired = days_left < 0 or status_text in {"expired", "inactive", "stopped", "stop"}
+        status_is_alert = status_text in {"alert", "warning", "near_expiry", "near-expiry"}
 
         if alert_text:
             alert_date = _parse_date(alert_text)
             if alert_date is None:
                 raise ValueError("Invalid alert date")
-            near_expiry = alert_date <= today <= expiry and not is_expired
+            near_expiry = (alert_date <= today <= expiry and not is_expired) or (status_is_alert and not is_expired)
         else:
-            near_expiry = 0 <= days_left <= ALERT_DAYS_BEFORE_EXPIRY and not is_expired
+            near_expiry = (0 <= days_left <= ALERT_DAYS_BEFORE_EXPIRY and not is_expired) or (status_is_alert and not is_expired)
     except (KeyError, TypeError, ValueError):
         return {"sub": sub, "is_expired": False, "days_left": None, "near_expiry": False}
 

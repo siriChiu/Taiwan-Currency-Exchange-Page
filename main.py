@@ -82,25 +82,25 @@ def _get_or_prompt_user_identity() -> dict:
 st.title("Currency Exchange")
 
 default_currency_adjust_config = {
-        "USD": 1.3,
-        "HKD": 0.15,
-        "GBP": 1.5,
+        "USD": 1.20,
+        "HKD": 0.13,
+        "GBP": 1.4,
         "AUD": 1.2,
-        "CAD": 1.2,
-        "SGD": 1.2,
-        "CHF": 1.3,
+        "CAD": 1.21,
+        "SGD": 1.22,
+        "CHF": 1.45,
         "JPY": 0.012,
         "ZAR": 0.0,
         "SEK": 0.0,
-        "NZD": 1.2,
+        "NZD": 1.22,
         "THB": 0.05,
         "PHP": 0.05,
-        "IDR": 0.0,
-        "EUR": 1.5,
-        "KRW": 0.0012,
-        "VND": 0.0005,
+        "IDR": 0.000095,
+        "EUR": 1.3,
+        "KRW": 0.00105,
+        "VND": 0.0000884,
         "MYR": 0.5,
-        "CNY": 0.25
+        "CNY": 0.3
     }
 
 if 'currency_adjust_config' not in st.session_state:

@@ -22,15 +22,47 @@ if (
     st.switch_page("main.py")
     st.stop()
 
+
+def _switch_user_and_reverify() -> None:
+    browser_storage.delete_key("user_identity")
+    browser_storage.delete_key("currency_adjust_config")
+    browser_storage.rotate_browser_user_id()
+    st.session_state['force_identity_prompt'] = True
+    st.session_state['user_identity'] = None
+    st.session_state['currency_adjust_config'] = {
+        "USD": 1.20,
+        "HKD": 0.13,
+        "GBP": 1.4,
+        "AUD": 1.2,
+        "CAD": 1.21,
+        "SGD": 1.22,
+        "CHF": 1.45,
+        "JPY": 0.012,
+        "ZAR": 0.0,
+        "SEK": 0.0,
+        "NZD": 1.22,
+        "THB": 0.05,
+        "PHP": 0.05,
+        "IDR": 0.000095,
+        "EUR": 1.3,
+        "KRW": 0.00105,
+        "VND": 0.0000884,
+        "MYR": 0.5,
+        "CNY": 0.3
+    }
+
+    st.session_state['user'] = None
+    st.session_state['token'] = None
+    st.session_state['subscription_sync_message'] = None
+    st.switch_page("main.py")
+    st.stop()
+
 user_id = st.session_state['user'].id
 identity = st.session_state.get('user_identity') or browser_storage.get_json("user_identity")
 
 if not identity or not identity.get("company") or not identity.get("owner"):
     st.warning("找不到使用者識別資料，請重新驗證。")
-    st.session_state['user'] = None
-    st.session_state['token'] = None
-    st.switch_page("main.py")
-    st.stop()
+    _switch_user_and_reverify()
 
 try:
     latest_subscription = validation.get_subscription_info_for_user(
@@ -57,17 +89,19 @@ if st.session_state.get('subscription_sync_message'):
 _sub_status = local_storage.get_subscription_status(user_id)
 if _sub_status["is_expired"]:
     st.error(
-        "⛔ 您的訂閱已到期，無法繼續使用。\n\n"
+        "您的訂閱已到期，無法繼續使用。\n\n"
         f"到期日：{_sub_status['sub']['expiration_date']}\n\n"
         "請聯絡管理員續訂。",
-        icon="🔒",
+        icon="⛔",
     )
+    if st.button("切換使用者重新驗證", use_container_width=True):
+        _switch_user_and_reverify()
     st.stop()
 elif _sub_status["near_expiry"]:
     days = _sub_status["days_left"]
     expiry_date = _sub_status["sub"]["expiration_date"]
     st.warning(
-        f"⚠️ 您的訂閱將在 **{days} 天後**（{expiry_date}）到期，請儘早聯絡管理員續訂。",
+        f"您的訂閱將在 **{days} 天後**（{expiry_date}）到期，請儘早聯絡管理員續訂。",
         icon="⚠️",
     )
 # ─────────────────────────────────────────────────────────────────────────────
@@ -116,7 +150,7 @@ with st.sidebar:
                 with column1:
                     st.write(key)
                 with column2:
-                    user_currency_adjust_dict[key] = st.number_input(key, value=value, step=0.000001, format="%.6f", label_visibility="collapsed")
+                    user_currency_adjust_dict[key] = st.number_input(key, value=value, step=0.0000001, format="%.7f", label_visibility="collapsed")
 
             submit_button = st.form_submit_button(label="確定", type="primary")
             if submit_button:
@@ -130,37 +164,7 @@ with st.sidebar:
         #     st.session_state['token'] = None
         #     st.switch_page("main.py")
         if st.button("切換使用者", use_container_width=True):
-            browser_storage.delete_key("user_identity")
-            browser_storage.delete_key("currency_adjust_config")
-            browser_storage.rotate_browser_user_id()
-            st.session_state['force_identity_prompt'] = True
-            st.session_state['user_identity'] = None
-            st.session_state['currency_adjust_config'] = {
-                "USD": 1.3,
-                "HKD": 0.15,
-                "GBP": 1.5,
-                "AUD": 1.2,
-                "CAD": 1.2,
-                "SGD": 1.2,
-                "CHF": 1.3,
-                "JPY": 0.012,
-                "ZAR": 0.0,
-                "SEK": 0.0,
-                "NZD": 1.2,
-                "THB": 0.05,
-                "PHP": 0.05,
-                "IDR": 0.0,
-                "EUR": 1.5,
-                "KRW": 0.00123,
-                "VND": 0.000064,
-                "MYR": 0.5,
-                "CNY": 0.25,
-            }
-            st.session_state['user'] = None
-            st.session_state['token'] = None
-            st.session_state['subscription_sync_message'] = None
-            st.switch_page("main.py")
-            st.stop()
+            _switch_user_and_reverify()
 
 
 count = st_autorefresh(interval=10800000, key="parseCurrencyRate") # refresh every 3 hours
@@ -345,6 +349,6 @@ if currency_data:
                     st.markdown(f"<h5 style='text-align: center; color: #4c4c4c; padding: 0;'>{currency_short_name}</h5>", unsafe_allow_html=True)
                 with sub_col3:
                     cash_buy_adjusted = float(currency["Cash Buy"]) - float(user_currency_adjust_dict[currency_short_name[1:-1]])
-                    cash_buy_adjusted = round(cash_buy_adjusted, 4)
+                    cash_buy_adjusted = round(cash_buy_adjusted, 7)
                     st.markdown(f"<p style='text-align: center; color: #2727327; padding: 0; font-size: x-large; margin-bottom: -1rem; margin-top: 0.5rem;'>{cash_buy_adjusted}</p>", unsafe_allow_html=True)
 
