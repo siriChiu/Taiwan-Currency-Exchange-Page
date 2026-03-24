@@ -13,13 +13,31 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-if 'user' not in st.session_state or 'token' not in st.session_state:
+if (
+    'user' not in st.session_state
+    or 'token' not in st.session_state
+    or st.session_state.get('user') is None
+    or st.session_state.get('token') is None
+):
     st.switch_page("main.py")
+    st.stop()
 
 user_id = st.session_state['user'].id
+identity = st.session_state.get('user_identity') or browser_storage.get_json("user_identity")
+
+if not identity or not identity.get("company") or not identity.get("owner"):
+    st.warning("找不到使用者識別資料，請重新驗證。")
+    st.session_state['user'] = None
+    st.session_state['token'] = None
+    st.switch_page("main.py")
+    st.stop()
 
 try:
-    latest_subscription = validation.get_subscription_info()
+    latest_subscription = validation.get_subscription_info_for_user(
+        company=identity["company"],
+        owner=identity["owner"],
+        ssid=identity.get("ssid", ""),
+    )
     local_storage.save_subscription(user_id, latest_subscription)
     st.session_state['subscription_sync_message'] = None
 except Exception as exc:
@@ -89,6 +107,8 @@ with st.sidebar:
         # st.write("螢幕方向")
         # st.radio("螢幕方向", ["橫向", "直向"], index=0, key="screen_side", label_visibility="collapsed")
 
+        st.caption("每位使用者的匯率設定會儲存在此瀏覽器（localStorage）。")
+
         st.write("校正匯率")
         with st.form(key="form"):
             for key, value in user_currency_adjust_dict.items():
@@ -109,6 +129,38 @@ with st.sidebar:
         #     st.session_state['user'] = None
         #     st.session_state['token'] = None
         #     st.switch_page("main.py")
+        if st.button("切換使用者", use_container_width=True):
+            browser_storage.delete_key("user_identity")
+            browser_storage.delete_key("currency_adjust_config")
+            browser_storage.rotate_browser_user_id()
+            st.session_state['force_identity_prompt'] = True
+            st.session_state['user_identity'] = None
+            st.session_state['currency_adjust_config'] = {
+                "USD": 1.3,
+                "HKD": 0.15,
+                "GBP": 1.5,
+                "AUD": 1.2,
+                "CAD": 1.2,
+                "SGD": 1.2,
+                "CHF": 1.3,
+                "JPY": 0.012,
+                "ZAR": 0.0,
+                "SEK": 0.0,
+                "NZD": 1.2,
+                "THB": 0.05,
+                "PHP": 0.05,
+                "IDR": 0.0,
+                "EUR": 1.5,
+                "KRW": 0.00123,
+                "VND": 0.000064,
+                "MYR": 0.5,
+                "CNY": 0.25,
+            }
+            st.session_state['user'] = None
+            st.session_state['token'] = None
+            st.session_state['subscription_sync_message'] = None
+            st.switch_page("main.py")
+            st.stop()
 
 
 count = st_autorefresh(interval=10800000, key="parseCurrencyRate") # refresh every 3 hours

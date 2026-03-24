@@ -179,6 +179,16 @@ def _get_operator_info() -> dict:
     }
 
 
+def _build_google_sheet_client():
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    credential_coded = _get_credential_b64()
+    credentials = ServiceAccountCredentials.from_json_keyfile_dict(
+        json.loads(base64.b64decode(credential_coded).decode('utf-8')), scope
+    )
+    client = gspread.authorize(credentials)
+    return scope, credentials, client
+
+
 def write_config(company: str, owner: str, ssid: str) -> None:
     """Write company/owner/ssid to ~/.currency_app/config.ini"""
     _app_dir = Path.home() / ".currency_app"
@@ -225,15 +235,17 @@ def update_ssid_in_sheet(company: str, owner: str, ssid: str) -> None:
 
 
 def get_subscription_info():
-    spreadsheet_url = base64.b64decode(SPREADSHEET_URL_CODED).decode('utf-8')
     operator = _get_operator_info()
-
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    credential_coded = _get_credential_b64()
-    credentials = ServiceAccountCredentials.from_json_keyfile_dict(
-        json.loads(base64.b64decode(credential_coded).decode('utf-8')), scope
+    return get_subscription_info_for_user(
+        company=operator["company"],
+        owner=operator["owner"],
+        ssid=operator["ssid"],
     )
-    client = gspread.authorize(credentials)
+
+
+def get_subscription_info_for_user(company: str, owner: str, ssid: str = ""):
+    spreadsheet_url = base64.b64decode(SPREADSHEET_URL_CODED).decode('utf-8')
+    scope, credentials, client = _build_google_sheet_client()
     try:
         sheet = client.open_by_url(spreadsheet_url).sheet1
     except gspread.exceptions.APIError:
@@ -243,7 +255,7 @@ def get_subscription_info():
     manager.scope = scope
     manager.credentials = credentials
     manager.client = client
-    return manager.get_subscription_info(sheet, operator['company'], operator['owner'], operator['ssid'])
+    return manager.get_subscription_info(sheet, company, owner, ssid)
 
 
 def check():

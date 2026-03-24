@@ -33,6 +33,14 @@ def set_text(name: str, value: str) -> None:
     )
 
 
+def delete_key(name: str) -> None:
+    streamlit_js_eval(
+        js_expressions=f"window.localStorage.removeItem({_js_string(_storage_key(name))})",
+        want_output=False,
+        key=f"local_storage_delete_{name}",
+    )
+
+
 def get_json(name: str, default=None):
     raw_value = get_text(name)
     if raw_value in (None, ""):
@@ -52,6 +60,12 @@ def get_or_create_browser_user_id() -> str:
     if existing_id:
         return existing_id
 
+    generated_id = f"browser_{uuid.uuid4().hex[:24]}"
+    set_text("browser_user_id", generated_id)
+    return generated_id
+
+
+def rotate_browser_user_id() -> str:
     generated_id = f"browser_{uuid.uuid4().hex[:24]}"
     set_text("browser_user_id", generated_id)
     return generated_id

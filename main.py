@@ -1,10 +1,23 @@
 import streamlit as st
-import platform
-from pathlib import Path
 from types import SimpleNamespace
 from package import browser_storage
 from package import local_storage
 from package import validation
+
+
+st.markdown(
+    """
+    <style>
+        [data-testid="stSidebar"] {
+            display: none !important;
+        }
+        [data-testid="stSidebarNav"] {
+            display: none !important;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 def _build_browser_user() -> SimpleNamespace:
@@ -12,9 +25,13 @@ def _build_browser_user() -> SimpleNamespace:
     return SimpleNamespace(id=browser_user_id, email=f"{browser_user_id}@browser.local")
 
 
-def _sync_subscription_from_google_sheet(user_id: str) -> None:
+def _sync_subscription_from_google_sheet(user_id: str, identity: dict) -> None:
     try:
-        subscription_info = validation.get_subscription_info()
+        subscription_info = validation.get_subscription_info_for_user(
+            company=identity["company"],
+            owner=identity["owner"],
+            ssid=identity.get("ssid", ""),
+        )
         local_storage.save_subscription(user_id, subscription_info)
         st.session_state['subscription_sync_message'] = None
     except Exception as exc:
@@ -26,44 +43,41 @@ def _sync_subscription_from_google_sheet(user_id: str) -> None:
         )
 
 
-def _config_exists() -> bool:
-    # Check st.secrets first (Streamlit Cloud)
-    try:
-        _ = st.secrets["operator"]["company"]
-        return True
-    except (KeyError, Exception):
-        pass
-    _app_dir = Path.home() / ".currency_app"
-    return (_app_dir / "config.ini").exists() or Path("./config.ini").exists()
+def _get_or_prompt_user_identity() -> dict:
+    force_prompt = bool(st.session_state.get('force_identity_prompt'))
 
+    session_identity = st.session_state.get('user_identity')
+    if (not force_prompt) and isinstance(session_identity, dict) and session_identity.get("company") and session_identity.get("owner"):
+        return session_identity
 
-def _show_registration_form():
-    st.title("初次設定")
-    st.info("請輸入您的訂閱資訊，需與 Google Sheet 中的記錄相符。")
-    with st.form("setup_form"):
+    identity = None if force_prompt else browser_storage.get_json("user_identity")
+    if isinstance(identity, dict) and identity.get("company") and identity.get("owner"):
+        return identity
+
+    st.info("請先輸入您的公司與負責人，我們會對照 Google Sheet 驗證您的身分。")
+
+    with st.form("identity_form"):
         company = st.text_input("公司名稱")
         owner = st.text_input("負責人")
-        submitted = st.form_submit_button("確認註冊")
-    if submitted:
+        submit = st.form_submit_button("驗證並繼續")
+
+    if submit:
+        company = company.strip()
+        owner = owner.strip()
         if not company or not owner:
-            st.error("請填寫所有欄位")
-        else:
-            ssid = platform.node()
-            try:
-                validation.write_config(company, owner, ssid)
-            except Exception as e:
-                st.error(f"無法寫入設定檔：{e}")
-                st.stop()
-            try:
-                validation.update_ssid_in_sheet(company, owner, ssid)
-            except Exception as e:
-                st.warning(f"設定已儲存，但無法更新 Google Sheet SSID：{e}")
-            st.rerun()
+            st.error("請填寫公司名稱與負責人。")
+            st.stop()
+        try:
+            validation.get_subscription_info_for_user(company=company, owner=owner, ssid="")
+            identity = {"company": company, "owner": owner, "ssid": ""}
+            st.session_state['user_identity'] = identity
+            st.session_state['force_identity_prompt'] = False
+            browser_storage.set_json("user_identity", identity)
+            return identity
+        except Exception as exc:
+            st.error(f"驗證失敗：{exc}")
+
     st.stop()
-
-
-if not _config_exists():
-    _show_registration_form()
 
 st.title("Currency Exchange")
 
@@ -97,23 +111,31 @@ if 'user' not in st.session_state:
     st.session_state['token'] = None
 if 'subscription_sync_message' not in st.session_state:
     st.session_state['subscription_sync_message'] = None
+if 'user_identity' not in st.session_state:
+    st.session_state['user_identity'] = None
+if 'force_identity_prompt' not in st.session_state:
+    st.session_state['force_identity_prompt'] = False
 
 if st.session_state['user'] is None:
     browser_user = _build_browser_user()
+    identity = _get_or_prompt_user_identity()
     st.session_state['user'] = browser_user
+    st.session_state['user_identity'] = identity
     st.session_state['token'] = "browser-local-token"
     st.session_state['currency_adjust_config'] = browser_storage.get_json(
         "currency_adjust_config",
         default_currency_adjust_config.copy(),
     )
-    _sync_subscription_from_google_sheet(browser_user.id)
+    _sync_subscription_from_google_sheet(browser_user.id, identity)
     st.switch_page("pages/currency_exchange.py")
 
 if st.session_state['user']:
     user_id = st.session_state['user'].id
+    identity = st.session_state.get('user_identity') or _get_or_prompt_user_identity()
+    st.session_state['user_identity'] = identity
     st.session_state['currency_adjust_config'] = browser_storage.get_json(
         "currency_adjust_config",
         st.session_state.get('currency_adjust_config', default_currency_adjust_config),
     )
-    _sync_subscription_from_google_sheet(user_id)
+    _sync_subscription_from_google_sheet(user_id, identity)
     st.switch_page("pages/currency_exchange.py")
