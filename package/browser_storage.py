@@ -29,7 +29,7 @@ def set_text(name: str, value: str) -> None:
     streamlit_js_eval(
         js_expressions=f"window.localStorage.setItem({_js_string(_storage_key(name))}, {_js_string(value)})",
         want_output=False,
-        key=f"local_storage_set_{name}",
+        key=f"local_storage_set_{name}_{uuid.uuid4().hex}",
     )
 
 
@@ -37,7 +37,7 @@ def delete_key(name: str) -> None:
     streamlit_js_eval(
         js_expressions=f"window.localStorage.removeItem({_js_string(_storage_key(name))})",
         want_output=False,
-        key=f"local_storage_delete_{name}",
+        key=f"local_storage_delete_{name}_{uuid.uuid4().hex}",
     )
 
 

@@ -1,4 +1,3 @@
-import datetime
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
@@ -12,6 +11,28 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+DEFAULT_CURRENCY_ADJUST_CONFIG = {
+    "USD": 1.3,
+    "HKD": 0.15,
+    "GBP": 1.5,
+    "AUD": 1.2,
+    "CAD": 1.2,
+    "SGD": 1.2,
+    "CHF": 1.3,
+    "JPY": 0.012,
+    "ZAR": 0.0,
+    "SEK": 0.0,
+    "NZD": 1.2,
+    "THB": 0.05,
+    "PHP": 0.05,
+    "IDR": 0.0,
+    "EUR": 1.5,
+    "KRW": 0.00123,
+    "VND": 0.000064,
+    "MYR": 0.5,
+    "CNY": 0.25
+}
 
 if (
     'user' not in st.session_state
@@ -107,67 +128,67 @@ elif _sub_status["near_expiry"]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 if 'currency_adjust_config' not in st.session_state:
-    st.session_state['currency_adjust_config'] = {
-        "USD": 1.3,
-        "HKD": 0.15,
-        "GBP": 1.5,
-        "AUD": 1.2,
-        "CAD": 1.2,
-        "SGD": 1.2,
-        "CHF": 1.3,
-        "JPY": 0.012,
-        "ZAR": 0.0,
-        "SEK": 0.0,
-        "NZD": 1.2,
-        "THB": 0.05,
-        "PHP": 0.05,
-        "IDR": 0.0,
-        "EUR": 1.5,
-        "KRW": 0.00123,
-        "VND": 0.000064,
-        "MYR": 0.5,
-        "CNY": 0.25
-    }
+    st.session_state['currency_adjust_config'] = dict(DEFAULT_CURRENCY_ADJUST_CONFIG)
 
-st.session_state['currency_adjust_config'] = browser_storage.get_json(
-    "currency_adjust_config",
-    st.session_state['currency_adjust_config'],
-)
+if 'currency_adjust_config_loaded' not in st.session_state:
+    stored_currency_adjust_config = browser_storage.get_json("currency_adjust_config")
+    if stored_currency_adjust_config:
+        st.session_state['currency_adjust_config'] = stored_currency_adjust_config
+    st.session_state['currency_adjust_config_loaded'] = True
 
 user_currency_adjust_dict = dict(st.session_state['currency_adjust_config'])
 
-with st.sidebar:
-    with st.expander("設定",icon="⚙️", expanded=True):
-        # st.write("螢幕方向")
-        # st.radio("螢幕方向", ["橫向", "直向"], index=0, key="screen_side", label_visibility="collapsed")
 
-        st.caption("每位使用者的匯率設定會儲存在此瀏覽器（localStorage）。")
+def render_settings_sidebar(saved_currency_adjust_dict):
+    active_currency_adjust_dict = dict(saved_currency_adjust_dict)
 
-        st.write("校正匯率")
-        with st.form(key="form"):
-            for key, value in user_currency_adjust_dict.items():
-                column1, column2 = st.columns([1, 3])
-                with column1:
-                    st.write(key)
-                with column2:
-                    user_currency_adjust_dict[key] = st.number_input(key, value=value, step=0.0000001, format="%.7f", label_visibility="collapsed")
+    with st.sidebar:
+        with st.expander("設定",icon="⚙️", expanded=True):
+            # st.write("螢幕方向")
+            # st.radio("螢幕方向", ["橫向", "直向"], index=0, key="screen_side", label_visibility="collapsed")
 
-            submit_button = st.form_submit_button(label="確定", type="primary")
-            if submit_button:
-                browser_storage.set_json("currency_adjust_config", user_currency_adjust_dict)
-                st.session_state['currency_adjust_config'] = dict(user_currency_adjust_dict)
-                st.success("已儲存到此瀏覽器的個人匯率設定")
-        
+            st.caption("每位使用者的匯率設定會儲存在此瀏覽器（localStorage）。")
 
-        # if st.button("Logout"):
-        #     st.session_state['user'] = None
-        #     st.session_state['token'] = None
-        #     st.switch_page("main.py")
-        if st.button("切換使用者", use_container_width=True):
-            _switch_user_and_reverify()
+            st.write("校正匯率")
+            with st.form(key="currency_adjust_form", enter_to_submit=False):
+                draft_currency_adjust_dict = {}
+                for key, value in saved_currency_adjust_dict.items():
+                    column1, column2 = st.columns([1, 3])
+                    with column1:
+                        st.write(key)
+                    with column2:
+                        draft_currency_adjust_dict[key] = st.number_input(
+                            key,
+                            value=float(value),
+                            step=0.0000001,
+                            format="%.7f",
+                            key=f"currency_adjust_{key}",
+                            label_visibility="collapsed",
+                        )
+
+                submit_button = st.form_submit_button(label="確定", type="primary")
+                if submit_button:
+                    browser_storage.set_json("currency_adjust_config", draft_currency_adjust_dict)
+                    st.session_state['currency_adjust_config'] = dict(draft_currency_adjust_dict)
+                    st.session_state['currency_adjust_config_loaded'] = True
+                    active_currency_adjust_dict = dict(draft_currency_adjust_dict)
+                    st.success("已儲存到此瀏覽器的個人匯率設定")
+            
+
+            # if st.button("Logout"):
+            #     st.session_state['user'] = None
+            #     st.session_state['token'] = None
+            #     st.switch_page("main.py")
+            if st.button("切換使用者", use_container_width=True):
+                _switch_user_and_reverify()
+
+    return active_currency_adjust_dict
 
 
-count = st_autorefresh(interval=10800000, key="parseCurrencyRate") # refresh every 3 hours
+user_currency_adjust_dict = render_settings_sidebar(user_currency_adjust_dict)
+
+
+count = st_autorefresh(interval=14400000, key="parseCurrencyRate") # refresh every 4 hours
 
 st.html("""
     <style>
@@ -231,13 +252,6 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-    
-_, col_refresh = st.columns([7, 3])
-with col_refresh:
-    last_update_time = datetime.datetime.now().strftime("%y-%m-%d %H:%M:%S")
-    if st.button(f"🔄 Rrefresh time: {last_update_time}", type='tertiary',use_container_width= True):
-        st.rerun()
-
 contry_image_dict = {
     "USD": "https://flagicons.lipis.dev/flags/4x3/us.svg",
     "HKD": "https://flagicons.lipis.dev/flags/4x3/hk.svg",
@@ -260,15 +274,81 @@ contry_image_dict = {
     "CNY": "https://flagicons.lipis.dev/flags/4x3/cn.svg",
 }
 
-link = "https://rate.bot.com.tw/xrt/all/day?Lang=en-US"
-f = requests.get(link)
-raw_html = f.text
+link = "https://rate.bot.com.tw/xrt?Lang=en-US"
+
+
+def fetch_with_requests(url):
+    response = requests.get(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/126.0 Safari/537.36"
+            ),
+            "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+        },
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.text
+
+
+def fetch_with_browser(url):
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.webdriver.support.ui import WebDriverWait
+
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--window-size=1280,900")
+    options.add_argument("--lang=zh-TW")
+    options.add_argument(
+        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+    )
+
+    driver = webdriver.Chrome(options=options)
+    try:
+        driver.get(url)
+        WebDriverWait(driver, 30).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "table.table tbody tr"))
+        )
+        return driver.page_source
+    finally:
+        driver.quit()
+
+
+@st.cache_data(ttl=14400, show_spinner=False)
+def fetch_exchange_rate_html(url):
+    raw_html = fetch_with_requests(url)
+    if "Challenge Validation" in raw_html:
+        raw_html = fetch_with_browser(url)
+    return raw_html
+
+
+try:
+    with st.spinner("Loading live exchange rates from Bank of Taiwan..."):
+        raw_html = fetch_exchange_rate_html(link)
+except requests.RequestException as exc:
+    st.error(f"Unable to load Bank of Taiwan exchange rates: {exc}")
+    st.stop()
+except Exception as exc:
+    st.error(f"Unable to load live Bank of Taiwan data with browser automation: {exc}")
+    st.stop()
 
 # Parse the HTML with BeautifulSoup
 soup = BeautifulSoup(raw_html, "html.parser")
 
 # Locate table rows
 table_rows = soup.select("table.table tbody tr")
+if not table_rows:
+    st.error("Unable to find the exchange-rate table in the Bank of Taiwan response.")
+    st.stop()
 
 # Prepare a list of dicts for each row
 currency_data = []
