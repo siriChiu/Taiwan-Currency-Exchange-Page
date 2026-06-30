@@ -295,16 +295,29 @@ def fetch_with_requests(url):
 
 
 def fetch_with_browser(url):
+    import shutil
+
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
     from selenium.webdriver.common.by import By
+    from selenium.webdriver.chrome.service import Service
     from selenium.webdriver.support import expected_conditions as EC
     from selenium.webdriver.support.ui import WebDriverWait
 
     options = Options()
+    chrome_binary = (
+        shutil.which("chromium")
+        or shutil.which("chromium-browser")
+        or shutil.which("google-chrome")
+        or shutil.which("chrome")
+    )
+    if chrome_binary:
+        options.binary_location = chrome_binary
+
     options.add_argument("--headless=new")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1280,900")
     options.add_argument("--lang=zh-TW")
     options.add_argument(
@@ -312,7 +325,12 @@ def fetch_with_browser(url):
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
     )
 
-    driver = webdriver.Chrome(options=options)
+    chromedriver_path = shutil.which("chromedriver")
+    if chromedriver_path:
+        driver = webdriver.Chrome(service=Service(chromedriver_path), options=options)
+    else:
+        driver = webdriver.Chrome(options=options)
+
     try:
         driver.get(url)
         WebDriverWait(driver, 30).until(
