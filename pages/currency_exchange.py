@@ -274,7 +274,30 @@ contry_image_dict = {
     "CNY": "https://flagicons.lipis.dev/flags/4x3/cn.svg",
 }
 
+CURRENCY_DISPLAY_NAMES = {
+    "USD": "American Dollar",
+    "HKD": "Hong Kong Dollar",
+    "GBP": "British Pound",
+    "AUD": "Australian Dollar",
+    "CAD": "Canadian Dollar",
+    "SGD": "Singapore Dollar",
+    "CHF": "Swiss Franc",
+    "JPY": "Japanese Yen",
+    "ZAR": "South African Rand",
+    "SEK": "Swedish Krona",
+    "NZD": "New Zealand Dollar",
+    "THB": "Thai Baht",
+    "PHP": "Philippine Peso",
+    "IDR": "Indonesian Rupiah",
+    "EUR": "Euro",
+    "KRW": "Korean Won",
+    "VND": "Vietnamese Dong",
+    "MYR": "Malaysian Ringgit",
+    "CNY": "Chinese Yuan",
+}
+
 link = "https://rate.bot.com.tw/xrt?Lang=en-US"
+PLAYWRIGHT_TIMEOUT_SECONDS = 35
 
 
 def fetch_with_requests(url):
@@ -294,228 +317,246 @@ def fetch_with_requests(url):
     return response.text
 
 
-def fetch_with_browser(url):
+def summarize_error(exc, max_length=500):
+    text = str(exc).strip().replace("\n", " ")
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 3] + "..."
+
+
+def parse_currency_data_from_html(raw_html):
+    soup = BeautifulSoup(raw_html, "html.parser")
+    table_rows = soup.select("table.table tbody tr")
+    currency_data = []
+
+    for row in table_rows:
+        tds = row.find_all("td")
+        if len(tds) < 6:
+            continue
+
+        currency_text = tds[0].get_text(" ", strip=True)
+        if "(" not in currency_text or ")" not in currency_text:
+            continue
+
+        current_short_name = currency_text.rsplit("(", 1)[-1].split(")", 1)[0]
+        if current_short_name in {"ZAR", "SEK"}:
+            continue
+
+        cash_buy = tds[1].get_text(strip=True)
+        if cash_buy in {"", "-"}:
+            continue
+
+        currency_data.append({
+            "Image": contry_image_dict.get(current_short_name, ""),
+            "Currency": (
+                f"{CURRENCY_DISPLAY_NAMES.get(current_short_name, current_short_name)} "
+                f"({current_short_name})"
+            ),
+            "Cash Buy": cash_buy,
+        })
+
+    return currency_data
+
+
+def fetch_with_playwright(url):
     import os
     import shutil
-    import tempfile
     from pathlib import Path
 
-    from selenium import webdriver
-    from selenium.webdriver.chrome.options import Options
-    from selenium.common.exceptions import WebDriverException
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.chrome.service import Service
-    from selenium.webdriver.support import expected_conditions as EC
-    from selenium.webdriver.support.ui import WebDriverWait
+    from playwright.sync_api import Error as PlaywrightError
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+    from playwright.sync_api import sync_playwright
 
-    chrome_binary = next(
-        (
-            path
-            for path in (
-                os.environ.get("CHROME_BIN"),
-                os.environ.get("GOOGLE_CHROME_BIN"),
-                os.environ.get("CHROMIUM_PATH"),
-                shutil.which("chromium"),
-                shutil.which("chromium-browser"),
-                shutil.which("google-chrome"),
-                shutil.which("google-chrome-stable"),
-                shutil.which("chrome"),
-                shutil.which("chrome.exe"),
-                shutil.which("msedge"),
-                shutil.which("msedge.exe"),
-                "/usr/bin/chromium",
-                "/usr/bin/chromium-browser",
-                "/usr/bin/google-chrome",
-            )
-            if path and Path(path).exists()
-        ),
-        None,
+    timeout_ms = int(os.environ.get(
+        "BOT_PLAYWRIGHT_TIMEOUT_MS",
+        PLAYWRIGHT_TIMEOUT_SECONDS * 1000,
+    ))
+    browser_candidates = (
+        os.environ.get("CHROME_BIN"),
+        os.environ.get("GOOGLE_CHROME_BIN"),
+        os.environ.get("CHROMIUM_PATH"),
+        shutil.which("chromium"),
+        shutil.which("chromium-browser"),
+        shutil.which("google-chrome"),
+        shutil.which("google-chrome-stable"),
+        shutil.which("chrome"),
+        shutil.which("chrome.exe"),
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/google-chrome",
     )
-    chromedriver_path = next(
-        (
-            path
-            for path in (
-                os.environ.get("CHROMEDRIVER_PATH"),
-                shutil.which("chromedriver"),
-                "/usr/bin/chromedriver",
-            )
-            if path and Path(path).exists()
-        ),
+    browser_path = next(
+        (path for path in browser_candidates if path and Path(path).exists()),
         None,
     )
 
-    def build_options(headless_argument, remote_debugging_argument, extra_arguments=None):
-        options = Options()
-        if chrome_binary:
-            options.binary_location = chrome_binary
-
-        options.add_argument(headless_argument)
-        options.add_argument("--disable-gpu")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-setuid-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-extensions")
-        options.add_argument("--disable-crash-reporter")
-        options.add_argument("--disable-crashpad")
-        options.add_argument("--disable-software-rasterizer")
-        options.add_argument(remote_debugging_argument)
-        options.add_argument("--window-size=1280,900")
-        options.add_argument("--lang=zh-TW")
-        options.add_argument(
-            "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
-        )
-        for argument in extra_arguments or ():
-            options.add_argument(argument)
-        return options
-
-    last_error = None
-    last_attempt = None
-    log_paths = []
-    launch_attempts = (
-        ("--headless=new", "--remote-debugging-pipe", ()),
-        ("--headless=new", "--remote-debugging-port=0", ()),
-        ("--headless", "--remote-debugging-pipe", ()),
-        ("--headless", "--remote-debugging-port=0", ()),
-        ("--headless=new", "--remote-debugging-pipe", ("--no-zygote", "--single-process")),
-        ("--headless", "--remote-debugging-pipe", ("--no-zygote", "--single-process")),
-    )
-
-    for headless_argument, remote_debugging_argument, extra_arguments in launch_attempts:
-        last_attempt = " ".join(
-            argument
-            for argument in (
-                headless_argument,
-                remote_debugging_argument,
-                *extra_arguments,
-            )
-        )
-        log_file = tempfile.NamedTemporaryFile(
-            prefix="currency_exchange_chromedriver_",
-            suffix=".log",
-            delete=False,
-        )
-        log_paths.append(Path(log_file.name))
-        log_file.close()
-
-        service_kwargs = {
-            "log_output": str(log_paths[-1]),
-            "service_args": ["--verbose"],
-        }
-        if chromedriver_path:
-            service_kwargs["executable_path"] = chromedriver_path
-
-        driver = None
-        try:
-            driver = webdriver.Chrome(
-                service=Service(**service_kwargs),
-                options=build_options(
-                    headless_argument,
-                    remote_debugging_argument,
-                    extra_arguments,
-                ),
-            )
-            driver.get(url)
-            WebDriverWait(driver, 30).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "table.table tbody tr"))
-            )
-            return driver.page_source
-        except WebDriverException as exc:
-            last_error = exc
-        finally:
-            if driver:
-                driver.quit()
-
-    log_tail = ""
-    for log_path in reversed(log_paths):
-        if log_path.exists():
-            try:
-                log_tail = "\n".join(log_path.read_text(errors="replace").splitlines()[-40:])
-                break
-            except OSError:
-                pass
-
-    diagnostic_parts = [
-        f"Chrome binary: {chrome_binary or 'not found on PATH'}",
-        f"ChromeDriver: {chromedriver_path or 'Selenium Manager'}",
-        f"Last launch attempt: {last_attempt}",
-        f"Last Selenium error: {last_error}",
+    launch_args = [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--disable-extensions",
+        "--disable-crash-reporter",
+        "--disable-crashpad",
     ]
-    if log_tail:
-        diagnostic_parts.append(f"ChromeDriver log tail:\n{log_tail}")
+    launch_options = {
+        "headless": True,
+        "args": launch_args,
+        "timeout": timeout_ms,
+    }
+    if browser_path:
+        launch_options["executable_path"] = browser_path
 
-    for log_path in log_paths:
-        try:
-            os.unlink(log_path)
-        except OSError:
-            pass
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(**launch_options)
+            try:
+                context = browser.new_context(
+                    locale="zh-TW",
+                    viewport={"width": 1280, "height": 900},
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/126.0 Safari/537.36"
+                    ),
+                )
+                page = context.new_page()
+                page.set_default_timeout(timeout_ms)
+                page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                page.wait_for_selector("table.table tbody tr", timeout=timeout_ms)
+                return page.content()
+            finally:
+                browser.close()
+    except (PlaywrightError, PlaywrightTimeoutError) as exc:
+        raise RuntimeError(
+            f"Playwright could not load Bank of Taiwan within {timeout_ms // 1000}s: {exc}"
+        ) from exc
 
-    raise RuntimeError("\n".join(diagnostic_parts))
+
+def fetch_with_finmind():
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from datetime import date, timedelta
+
+    api_url = "https://api.finmindtrade.com/api/v4/data"
+    start_date = (date.today() - timedelta(days=14)).isoformat()
+    currency_codes = [
+        code
+        for code in contry_image_dict
+        if code not in {"ZAR", "SEK"}
+    ]
+
+    def fetch_currency(currency_code):
+        response = requests.get(
+            api_url,
+            params={
+                "dataset": "TaiwanExchangeRate",
+                "data_id": currency_code,
+                "start_date": start_date,
+            },
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/126.0 Safari/537.36"
+                ),
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if payload.get("status") != 200 or not payload.get("data"):
+            raise RuntimeError(f"FinMind returned no exchange-rate data for {currency_code}.")
+
+        latest_rate = sorted(payload["data"], key=lambda item: item["date"])[-1]
+        cash_buy = latest_rate.get("cash_buy")
+        if cash_buy in (None, "", "-"):
+            raise RuntimeError(f"FinMind returned no cash-buy rate for {currency_code}.")
+
+        return currency_code, {
+            "Image": contry_image_dict.get(currency_code, ""),
+            "Currency": f"{CURRENCY_DISPLAY_NAMES[currency_code]} ({currency_code})",
+            "Cash Buy": str(cash_buy),
+        }
+
+    rates_by_code = {}
+    errors = []
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        future_to_code = {
+            executor.submit(fetch_currency, currency_code): currency_code
+            for currency_code in currency_codes
+        }
+        for future in as_completed(future_to_code):
+            currency_code = future_to_code[future]
+            try:
+                code, rate = future.result()
+                rates_by_code[code] = rate
+            except Exception as exc:
+                errors.append(f"{currency_code}: {exc}")
+
+    if not rates_by_code:
+        raise RuntimeError("Unable to load fallback exchange rates from FinMind: " + "; ".join(errors))
+
+    return [
+        rates_by_code[currency_code]
+        for currency_code in currency_codes
+        if currency_code in rates_by_code
+    ]
 
 
 @st.cache_data(ttl=14400, show_spinner=False)
-def fetch_exchange_rate_html(url):
-    raw_html = fetch_with_requests(url)
-    if "Challenge Validation" in raw_html:
-        raw_html = fetch_with_browser(url)
-    return raw_html
+def fetch_exchange_rate_data(url):
+    request_error = None
+    try:
+        raw_html = fetch_with_requests(url)
+    except requests.RequestException as exc:
+        raw_html = ""
+        request_error = summarize_error(exc)
+
+    if raw_html and "Challenge Validation" not in raw_html:
+        currency_data = parse_currency_data_from_html(raw_html)
+        if currency_data:
+            return currency_data, "Bank of Taiwan", None
+
+    playwright_error = None
+    try:
+        raw_html = fetch_with_playwright(url)
+        currency_data = parse_currency_data_from_html(raw_html)
+        if currency_data:
+            return (
+                currency_data,
+                "Bank of Taiwan (Playwright)",
+                "台灣銀行網站回傳驗證頁，已透過 Playwright 載入台銀匯率資料。",
+            )
+        playwright_error = "Playwright loaded the page, but the exchange-rate table was not found."
+    except Exception as exc:
+        playwright_error = summarize_error(exc)
+
+    return (
+        fetch_with_finmind(),
+        "FinMind",
+        "台灣銀行網站目前無法直接取得匯率表格，"
+        "已改用 FinMind 的台銀匯率資料。"
+        f"requests：{request_error or '回傳驗證頁或未解析到表格'}；"
+        f"Playwright：{playwright_error}",
+    )
 
 
 try:
-    with st.spinner("Loading live exchange rates from Bank of Taiwan..."):
-        raw_html = fetch_exchange_rate_html(link)
+    with st.spinner("Loading exchange rates..."):
+        currency_data, data_source, data_note = fetch_exchange_rate_data(link)
 except requests.RequestException as exc:
-    st.error(f"Unable to load Bank of Taiwan exchange rates: {exc}")
+    st.error(f"Unable to load exchange-rate data: {exc}")
     st.stop()
 except Exception as exc:
-    st.error(f"Unable to load live Bank of Taiwan data with browser automation: {exc}")
+    st.error(f"Unable to load exchange-rate data: {exc}")
     st.stop()
 
-# Parse the HTML with BeautifulSoup
-soup = BeautifulSoup(raw_html, "html.parser")
+if data_note:
+    st.info(data_note, icon="ℹ️")
 
-# Locate table rows
-table_rows = soup.select("table.table tbody tr")
-if not table_rows:
-    st.error("Unable to find the exchange-rate table in the Bank of Taiwan response.")
+if not currency_data:
+    st.error("Unable to find exchange-rate data.")
     st.stop()
-
-# Prepare a list of dicts for each row
-currency_data = []
-
-for row in table_rows:
-    tds = row.find_all("td")
-    if len(tds) < 6:
-        continue
-    
-    # tds[0]: 幣別 (Currency Name)
-    # tds[1]: 現金買入 (Cash Buy)
-    # tds[2]: 現金賣出 (Cash Sell)
-    # tds[3]: 即期買入 (Spot Buy)
-    # tds[4]: 即期賣出 (Spot Sell)
-    # tds[5]: 遠期匯率 link
-    currency_short_name = tds[0].get_text(strip=True)
-    current_name_remove_repeated = currency_short_name.split(")")[1] + ")"
-    current_short_name = current_name_remove_repeated.split(" ")[-1][1:-1]
-    country_image = contry_image_dict.get(current_short_name, "")
-
-    cash_buy = tds[1].get_text(strip=True)
-    cash_sell = tds[2].get_text(strip=True)
-    spot_buy = tds[3].get_text(strip=True)
-    spot_sell = tds[4].get_text(strip=True)
-
-    # The link text is "查詢" in Chinese, but we'll display "Inquiry"
-    forward_link = tds[5].find("a")
-    forward_text = "Inquiry" if forward_link else ""
-    
-    if current_short_name == "ZAR" or current_short_name == "SEK":
-        continue
-
-    currency_data.append({
-        "Image": country_image,
-        "Currency": current_name_remove_repeated,
-        "Cash Buy": cash_buy,
-    })
 
 
 # Split the data into two columns
