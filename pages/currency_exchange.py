@@ -295,50 +295,162 @@ def fetch_with_requests(url):
 
 
 def fetch_with_browser(url):
+    import os
     import shutil
+    import tempfile
+    from pathlib import Path
 
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
+    from selenium.common.exceptions import WebDriverException
     from selenium.webdriver.common.by import By
     from selenium.webdriver.chrome.service import Service
     from selenium.webdriver.support import expected_conditions as EC
     from selenium.webdriver.support.ui import WebDriverWait
 
-    options = Options()
-    chrome_binary = (
-        shutil.which("chromium")
-        or shutil.which("chromium-browser")
-        or shutil.which("google-chrome")
-        or shutil.which("chrome")
+    chrome_binary = next(
+        (
+            path
+            for path in (
+                os.environ.get("CHROME_BIN"),
+                os.environ.get("GOOGLE_CHROME_BIN"),
+                os.environ.get("CHROMIUM_PATH"),
+                shutil.which("chromium"),
+                shutil.which("chromium-browser"),
+                shutil.which("google-chrome"),
+                shutil.which("google-chrome-stable"),
+                shutil.which("chrome"),
+                shutil.which("chrome.exe"),
+                shutil.which("msedge"),
+                shutil.which("msedge.exe"),
+                "/usr/bin/chromium",
+                "/usr/bin/chromium-browser",
+                "/usr/bin/google-chrome",
+            )
+            if path and Path(path).exists()
+        ),
+        None,
     )
-    if chrome_binary:
-        options.binary_location = chrome_binary
-
-    options.add_argument("--headless=new")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--window-size=1280,900")
-    options.add_argument("--lang=zh-TW")
-    options.add_argument(
-        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+    chromedriver_path = next(
+        (
+            path
+            for path in (
+                os.environ.get("CHROMEDRIVER_PATH"),
+                shutil.which("chromedriver"),
+                "/usr/bin/chromedriver",
+            )
+            if path and Path(path).exists()
+        ),
+        None,
     )
 
-    chromedriver_path = shutil.which("chromedriver")
-    if chromedriver_path:
-        driver = webdriver.Chrome(service=Service(chromedriver_path), options=options)
-    else:
-        driver = webdriver.Chrome(options=options)
+    def build_options(headless_argument, remote_debugging_argument, extra_arguments=None):
+        options = Options()
+        if chrome_binary:
+            options.binary_location = chrome_binary
 
-    try:
-        driver.get(url)
-        WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "table.table tbody tr"))
+        options.add_argument(headless_argument)
+        options.add_argument("--disable-gpu")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-setuid-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--disable-crash-reporter")
+        options.add_argument("--disable-crashpad")
+        options.add_argument("--disable-software-rasterizer")
+        options.add_argument(remote_debugging_argument)
+        options.add_argument("--window-size=1280,900")
+        options.add_argument("--lang=zh-TW")
+        options.add_argument(
+            "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
         )
-        return driver.page_source
-    finally:
-        driver.quit()
+        for argument in extra_arguments or ():
+            options.add_argument(argument)
+        return options
+
+    last_error = None
+    last_attempt = None
+    log_paths = []
+    launch_attempts = (
+        ("--headless=new", "--remote-debugging-pipe", ()),
+        ("--headless=new", "--remote-debugging-port=0", ()),
+        ("--headless", "--remote-debugging-pipe", ()),
+        ("--headless", "--remote-debugging-port=0", ()),
+        ("--headless=new", "--remote-debugging-pipe", ("--no-zygote", "--single-process")),
+        ("--headless", "--remote-debugging-pipe", ("--no-zygote", "--single-process")),
+    )
+
+    for headless_argument, remote_debugging_argument, extra_arguments in launch_attempts:
+        last_attempt = " ".join(
+            argument
+            for argument in (
+                headless_argument,
+                remote_debugging_argument,
+                *extra_arguments,
+            )
+        )
+        log_file = tempfile.NamedTemporaryFile(
+            prefix="currency_exchange_chromedriver_",
+            suffix=".log",
+            delete=False,
+        )
+        log_paths.append(Path(log_file.name))
+        log_file.close()
+
+        service_kwargs = {
+            "log_output": str(log_paths[-1]),
+            "service_args": ["--verbose"],
+        }
+        if chromedriver_path:
+            service_kwargs["executable_path"] = chromedriver_path
+
+        driver = None
+        try:
+            driver = webdriver.Chrome(
+                service=Service(**service_kwargs),
+                options=build_options(
+                    headless_argument,
+                    remote_debugging_argument,
+                    extra_arguments,
+                ),
+            )
+            driver.get(url)
+            WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "table.table tbody tr"))
+            )
+            return driver.page_source
+        except WebDriverException as exc:
+            last_error = exc
+        finally:
+            if driver:
+                driver.quit()
+
+    log_tail = ""
+    for log_path in reversed(log_paths):
+        if log_path.exists():
+            try:
+                log_tail = "\n".join(log_path.read_text(errors="replace").splitlines()[-40:])
+                break
+            except OSError:
+                pass
+
+    diagnostic_parts = [
+        f"Chrome binary: {chrome_binary or 'not found on PATH'}",
+        f"ChromeDriver: {chromedriver_path or 'Selenium Manager'}",
+        f"Last launch attempt: {last_attempt}",
+        f"Last Selenium error: {last_error}",
+    ]
+    if log_tail:
+        diagnostic_parts.append(f"ChromeDriver log tail:\n{log_tail}")
+
+    for log_path in log_paths:
+        try:
+            os.unlink(log_path)
+        except OSError:
+            pass
+
+    raise RuntimeError("\n".join(diagnostic_parts))
 
 
 @st.cache_data(ttl=14400, show_spinner=False)
