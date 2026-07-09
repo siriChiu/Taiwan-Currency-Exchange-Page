@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 from streamlit_autorefresh import st_autorefresh
 from package import browser_storage
 from package import local_storage
+from package import ui_style
 from package import validation
 st.set_page_config(
     page_title="currency exchange",
@@ -11,6 +12,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+ui_style.hide_streamlit_cloud_badge()
 
 DEFAULT_CURRENCY_ADJUST_CONFIG = {
     "USD": 1.3,

@@ -2,8 +2,11 @@ import streamlit as st
 from types import SimpleNamespace
 from package import browser_storage
 from package import local_storage
+from package import ui_style
 from package import validation
 
+
+ui_style.hide_streamlit_cloud_badge()
 
 st.markdown(
     """
