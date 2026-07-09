@@ -298,6 +298,7 @@ CURRENCY_DISPLAY_NAMES = {
 
 link = "https://rate.bot.com.tw/xrt?Lang=en-US"
 PLAYWRIGHT_TIMEOUT_SECONDS = 35
+SELENIUM_TIMEOUT_SECONDS = 35
 
 
 def fetch_with_requests(url):
@@ -322,6 +323,64 @@ def summarize_error(exc, max_length=500):
     if len(text) <= max_length:
         return text
     return text[: max_length - 3] + "..."
+
+
+def find_existing_path(candidates):
+    from pathlib import Path
+
+    return next(
+        (path for path in candidates if path and Path(path).exists()),
+        None,
+    )
+
+
+def find_chromium_binary():
+    import os
+    import shutil
+
+    return find_existing_path((
+        os.environ.get("CHROME_BIN"),
+        os.environ.get("GOOGLE_CHROME_BIN"),
+        os.environ.get("CHROMIUM_PATH"),
+        shutil.which("chromium"),
+        shutil.which("chromium-browser"),
+        shutil.which("google-chrome"),
+        shutil.which("google-chrome-stable"),
+        shutil.which("chrome"),
+        shutil.which("chrome.exe"),
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/google-chrome",
+    ))
+
+
+def find_chromedriver():
+    import os
+    import shutil
+
+    return find_existing_path((
+        os.environ.get("CHROMEDRIVER_PATH"),
+        shutil.which("chromedriver"),
+        "/usr/bin/chromedriver",
+    ))
+
+
+def browser_common_args():
+    return [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--disable-extensions",
+        "--disable-crash-reporter",
+        "--disable-crashpad",
+        "--window-size=1280,900",
+        "--lang=zh-TW",
+        (
+            "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+        ),
+    ]
 
 
 def parse_currency_data_from_html(raw_html):
@@ -360,8 +419,6 @@ def parse_currency_data_from_html(raw_html):
 
 def fetch_with_playwright(url):
     import os
-    import shutil
-    from pathlib import Path
 
     from playwright.sync_api import Error as PlaywrightError
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -371,37 +428,10 @@ def fetch_with_playwright(url):
         "BOT_PLAYWRIGHT_TIMEOUT_MS",
         PLAYWRIGHT_TIMEOUT_SECONDS * 1000,
     ))
-    browser_candidates = (
-        os.environ.get("CHROME_BIN"),
-        os.environ.get("GOOGLE_CHROME_BIN"),
-        os.environ.get("CHROMIUM_PATH"),
-        shutil.which("chromium"),
-        shutil.which("chromium-browser"),
-        shutil.which("google-chrome"),
-        shutil.which("google-chrome-stable"),
-        shutil.which("chrome"),
-        shutil.which("chrome.exe"),
-        "/usr/bin/chromium",
-        "/usr/bin/chromium-browser",
-        "/usr/bin/google-chrome",
-    )
-    browser_path = next(
-        (path for path in browser_candidates if path and Path(path).exists()),
-        None,
-    )
-
-    launch_args = [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--disable-extensions",
-        "--disable-crash-reporter",
-        "--disable-crashpad",
-    ]
+    browser_path = find_chromium_binary()
     launch_options = {
         "headless": True,
-        "args": launch_args,
+        "args": browser_common_args(),
         "timeout": timeout_ms,
     }
     if browser_path:
@@ -433,91 +463,114 @@ def fetch_with_playwright(url):
         ) from exc
 
 
-def fetch_with_finmind():
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    from datetime import date, timedelta
+def fetch_with_selenium(url):
+    import os
+    import tempfile
+    from pathlib import Path
 
-    api_url = "https://api.finmindtrade.com/api/v4/data"
-    start_date = (date.today() - timedelta(days=14)).isoformat()
-    currency_codes = [
-        code
-        for code in contry_image_dict
-        if code not in {"ZAR", "SEK"}
-    ]
+    from selenium import webdriver
+    from selenium.common.exceptions import TimeoutException, WebDriverException
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.webdriver.support.ui import WebDriverWait
 
-    def fetch_currency(currency_code):
-        response = requests.get(
-            api_url,
-            params={
-                "dataset": "TaiwanExchangeRate",
-                "data_id": currency_code,
-                "start_date": start_date,
-            },
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/126.0 Safari/537.36"
-                ),
-            },
-            timeout=10,
+    timeout_seconds = int(os.environ.get(
+        "BOT_SELENIUM_TIMEOUT_SECONDS",
+        SELENIUM_TIMEOUT_SECONDS,
+    ))
+    browser_path = find_chromium_binary()
+    chromedriver_path = find_chromedriver()
+    launch_attempts = (
+        ("--headless=new", "--remote-debugging-pipe"),
+        ("--headless=new", "--remote-debugging-port=0"),
+        ("--headless", "--remote-debugging-pipe"),
+        ("--headless", "--remote-debugging-port=0"),
+        ("--headless=new", "--remote-debugging-pipe", "--no-zygote", "--single-process"),
+        ("--headless", "--remote-debugging-pipe", "--no-zygote", "--single-process"),
+    )
+    last_error = None
+    last_log_tail = ""
+    last_attempt = None
+
+    for launch_arguments in launch_attempts:
+        last_attempt = " ".join(launch_arguments)
+        options = Options()
+        if browser_path:
+            options.binary_location = browser_path
+        for argument in (*browser_common_args(), *launch_arguments):
+            options.add_argument(argument)
+
+        log_file = tempfile.NamedTemporaryFile(
+            prefix="currency_exchange_chromedriver_",
+            suffix=".log",
+            delete=False,
         )
-        response.raise_for_status()
-        payload = response.json()
-        if payload.get("status") != 200 or not payload.get("data"):
-            raise RuntimeError(f"FinMind returned no exchange-rate data for {currency_code}.")
+        log_path = Path(log_file.name)
+        log_file.close()
 
-        latest_rate = sorted(payload["data"], key=lambda item: item["date"])[-1]
-        cash_buy = latest_rate.get("cash_buy")
-        if cash_buy in (None, "", "-"):
-            raise RuntimeError(f"FinMind returned no cash-buy rate for {currency_code}.")
-
-        return currency_code, {
-            "Image": contry_image_dict.get(currency_code, ""),
-            "Currency": f"{CURRENCY_DISPLAY_NAMES[currency_code]} ({currency_code})",
-            "Cash Buy": str(cash_buy),
+        service_kwargs = {
+            "log_output": str(log_path),
+            "service_args": ["--verbose"],
         }
+        if chromedriver_path:
+            service_kwargs["executable_path"] = chromedriver_path
 
-    rates_by_code = {}
-    errors = []
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        future_to_code = {
-            executor.submit(fetch_currency, currency_code): currency_code
-            for currency_code in currency_codes
-        }
-        for future in as_completed(future_to_code):
-            currency_code = future_to_code[future]
+        driver = None
+        try:
+            driver = webdriver.Chrome(
+                service=Service(**service_kwargs),
+                options=options,
+            )
+            driver.set_page_load_timeout(timeout_seconds)
+            driver.get(url)
+            WebDriverWait(driver, timeout_seconds).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "table.table tbody tr"))
+            )
+            return driver.page_source
+        except (TimeoutException, WebDriverException) as exc:
+            last_error = summarize_error(exc)
+            if log_path.exists():
+                try:
+                    last_log_tail = "\n".join(log_path.read_text(errors="replace").splitlines()[-12:])
+                except OSError:
+                    last_log_tail = ""
+        finally:
+            if driver:
+                driver.quit()
             try:
-                code, rate = future.result()
-                rates_by_code[code] = rate
-            except Exception as exc:
-                errors.append(f"{currency_code}: {exc}")
+                log_path.unlink()
+            except OSError:
+                pass
 
-    if not rates_by_code:
-        raise RuntimeError("Unable to load fallback exchange rates from FinMind: " + "; ".join(errors))
-
-    return [
-        rates_by_code[currency_code]
-        for currency_code in currency_codes
-        if currency_code in rates_by_code
-    ]
+    raise RuntimeError(
+        "Selenium could not load Bank of Taiwan. "
+        f"Chrome binary: {browser_path or 'not found'}; "
+        f"ChromeDriver: {chromedriver_path or 'Selenium Manager'}; "
+        f"last attempt: {last_attempt}; "
+        f"last error: {last_error}; "
+        f"log tail: {last_log_tail or 'empty'}"
+    )
 
 
 @st.cache_data(ttl=14400, show_spinner=False)
 def fetch_exchange_rate_data(url):
-    request_error = None
+    errors = []
     try:
         raw_html = fetch_with_requests(url)
     except requests.RequestException as exc:
         raw_html = ""
-        request_error = summarize_error(exc)
+        errors.append(f"requests: {summarize_error(exc)}")
 
     if raw_html and "Challenge Validation" not in raw_html:
         currency_data = parse_currency_data_from_html(raw_html)
         if currency_data:
             return currency_data, "Bank of Taiwan", None
+        errors.append("requests: 台銀頁面已回應，但沒有解析到匯率表格。")
+    elif raw_html:
+        errors.append("requests: 台銀頁面回傳驗證頁。")
 
-    playwright_error = None
     try:
         raw_html = fetch_with_playwright(url)
         currency_data = parse_currency_data_from_html(raw_html)
@@ -527,17 +580,26 @@ def fetch_exchange_rate_data(url):
                 "Bank of Taiwan (Playwright)",
                 "台灣銀行網站回傳驗證頁，已透過 Playwright 載入台銀匯率資料。",
             )
-        playwright_error = "Playwright loaded the page, but the exchange-rate table was not found."
+        errors.append("Playwright: 已載入頁面，但沒有找到匯率表格。")
     except Exception as exc:
-        playwright_error = summarize_error(exc)
+        errors.append(f"Playwright: {summarize_error(exc)}")
 
-    return (
-        fetch_with_finmind(),
-        "FinMind",
-        "台灣銀行網站目前無法直接取得匯率表格，"
-        "已改用 FinMind 的台銀匯率資料。"
-        f"requests：{request_error or '回傳驗證頁或未解析到表格'}；"
-        f"Playwright：{playwright_error}",
+    try:
+        raw_html = fetch_with_selenium(url)
+        currency_data = parse_currency_data_from_html(raw_html)
+        if currency_data:
+            return (
+                currency_data,
+                "Bank of Taiwan (Selenium)",
+                "台灣銀行網站回傳驗證頁，已透過 Selenium 載入台銀匯率資料。",
+            )
+        errors.append("Selenium: 已載入頁面，但沒有找到匯率表格。")
+    except Exception as exc:
+        errors.append(f"Selenium: {summarize_error(exc)}")
+
+    raise RuntimeError(
+        "無法從台灣銀行取得匯率表格。"
+        + "；".join(errors)
     )
 
 
@@ -551,8 +613,8 @@ except Exception as exc:
     st.error(f"Unable to load exchange-rate data: {exc}")
     st.stop()
 
-if data_note:
-    st.info(data_note, icon="ℹ️")
+if data_note and hasattr(st, "toast"):
+    st.toast(data_note, icon="ℹ️")
 
 if not currency_data:
     st.error("Unable to find exchange-rate data.")

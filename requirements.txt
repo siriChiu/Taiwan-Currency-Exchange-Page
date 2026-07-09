@@ -8,3 +8,4 @@ gspread
 oauth2client
 streamlit-js-eval
 playwright
+selenium
